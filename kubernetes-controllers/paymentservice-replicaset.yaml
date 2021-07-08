@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: paymentservice
+  labels:
+    app: paymentservice
+    tier: paymentservice
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      tier: paymentservice
+  template:
+    metadata:
+      labels:
+        app: paymentservice
+        tier: paymentservice
+    spec:
+      containers:
+      - name: server
+        image: chudinanton/shop-paymentservice:v0.0.4

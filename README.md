@@ -2,6 +2,84 @@
 chudinanton Platform repository
 <details>
 <summary>
+<b>ДЗ №2 - kubernetes-controllers (Механика запуска и взаимодействия контейнеров в Kubernetes )</b></summary>
+
+- [x] Основное ДЗ
+
+- [x] Дополнительно ДЗ №1
+
+- [x] Дополнительно ДЗ №2
+
+- [x] Дополнительно ДЗ №3
+
+### <b>Основное задание</b>
+
+- Установка kind и поднятие кластера
+<pre>
+#brew install kind
+#cat kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+- role: control-plane
+- role: control-plane
+- role: worker
+- role: worker
+- role: worker
+#kind create cluster --config kind-config.yaml
+
+</pre>
+
+- Изучение ReplicaSet контроллера
+- Разворот frontend в ReplicaSet
+<pre>
+Контроллер ReplicaSet не позволяет проводить обновление pod'ов при изменении манифеста. Для развертывания и обновления приложения лучше использовать Deployment
+</pre>
+- Изучение контроллера Deployment
+- Сборка Docker образов paymentservice
+- Разворот paymentservice с помощью Deployment
+- Обновление Deployment paymentservice и Rollback
+- Изучение readinessProbe
+
+### <b>Дополнительное задание №1</b>
+- Написание двух стратегий обновления Deployment: Аналог blue-green и Reverse Rolling Update
+### <b>Дополнительное задание №2</b>
+- Изучение DaemonSet на примере Node Exporter и разворот на worker нодах c namespace monitoring
+<pre>
+Воспользовался готовым решением:
+https://github.com/prometheus-operator/kube-prometheus/tree/main/manifests
+</pre>
+### <b>Дополнительное задание №3</b>
+- Развернул Node Exporter на мастерах используя соответствующий допуск самому поду:
+<pre>
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: "Exists"
+        effect: NoSchedule
+</pre>
+
+Результат:
+<pre>
+#kubectl get all -n monitoring                                                                          
+NAME                      READY   STATUS    RESTARTS   AGE
+pod/node-exporter-g5vrh   2/2     Running   0          2m11s
+pod/node-exporter-gsbxs   2/2     Running   0          2m11s
+pod/node-exporter-jmg2f   2/2     Running   0          2m11s
+pod/node-exporter-tzwjv   2/2     Running   0          2m12s
+pod/node-exporter-wmg7g   2/2     Running   0          2m11s
+pod/node-exporter-xhp59   2/2     Running   0          2m11s
+
+NAME                    TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)    AGE
+service/node-exporter   ClusterIP   None         <none>        9100/TCP   2m12s
+
+NAME                           DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE
+daemonset.apps/node-exporter   6         6         6       6            6           kubernetes.io/os=linux   2m12s
+</pre>
+</details>
+
+<details>
+<summary>
 <b>ДЗ №1 kubernetes-intro (Знакомство с Kubernetes, основные понятия и архитектура )</b></summary>
 
 - [x] Основное ДЗ

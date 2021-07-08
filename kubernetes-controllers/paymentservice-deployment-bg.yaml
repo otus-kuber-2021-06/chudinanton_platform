@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paymentservice
+  labels:
+    app: paymentservice
+    tier: paymentservice
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      tier: paymentservice
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 3
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: paymentservice
+        tier: paymentservice
+    spec:
+      containers:
+      - name: server
+        image: chudinanton/shop-paymentservice:v0.0.4
