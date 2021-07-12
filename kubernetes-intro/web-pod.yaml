@@ -8,6 +8,15 @@ spec: # Описание Pod
   containers: # Описание контейнеров внутри Pod
   - name: web # Название контейнера
     image: chudinanton/nginx-otus:v.0.0.3 # Образ из которого создается контейнер
+    readinessProbe: # Добавим проверку готовности
+      httpGet: # веб-сервера отдавать
+        path: /index.html # контент
+        port: 80
+    livenessProbe:
+      tcpSocket:
+        port: 8000
+      initialDelaySeconds: 15
+      periodSeconds: 20
     volumeMounts:
       - name: app
         mountPath: /app    
