@@ -17,3 +17,4 @@ spec:
             name: svc-canary
             port:
               number: 8000
+
