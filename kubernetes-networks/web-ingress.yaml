@@ -1,4 +1,4 @@
-apiVersion: networking.k8s.io/v1
+apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
 metadata:
   name: web
@@ -9,10 +9,7 @@ spec:
   - http:
       paths:
       - path: /web
-        pathType: Prefix
         backend:
-          service:
-            name: web-svc
-            port:
-              number: 8000
+          serviceName: web-svc
+          servicePort: 8000
 
