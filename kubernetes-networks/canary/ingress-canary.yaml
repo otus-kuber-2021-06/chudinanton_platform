@@ -1,0 +1,20 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: canary
+  annotations:
+    nginx.ingress.kubernetes.io/canary: "true"  
+    nginx.ingress.kubernetes.io/canary-by-header: "canary"
+    nginx.ingress.kubernetes.io/canary-by-header-value: "true"
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /production
+        pathType: Prefix
+        backend:
+          service:
+            name: svc-canary
+            port:
+              number: 8000
+
