@@ -1,6 +1,23 @@
 # chudinanton_platform
 chudinanton Platform repository
 <details>
+<summary> <b>ДЗ №5 - kubernetes-volumes (Хранение данных в Kubernetes: Volumes, Storages, Statefull-приложения)</b></summary>
+
+- [x] Основное ДЗ
+
+- [x] Дополнительно ДЗ
+
+
+### <b>Основное задание  - StatefulSet с Minio </b>
+Развернул Minio и сделали headless service для него
+
+### <b>Дополнительное задание - использование secrets</b> 
+Убрал секреты в secret для не явного их хранения в манифесте StatefulSet
+Зашифровал credentials.yaml через ansible-vault
+
+
+</details>
+<details>
 <summary> <b>ДЗ №4 - kubernetes-network (Сетевая подсистема Kubernetes )</b></summary>
 
 - [x] Основное ДЗ
