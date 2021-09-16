@@ -1,6 +1,771 @@
 # chudinanton_platform
 chudinanton Platform repository
 <details>
+<summary> <b>ДЗ №6 - kubernetes-templating (Шаблонизация манифестов Kubernetes)</b></summary>
+
+- [x] Основное ДЗ
+
+- [x] Все дополнительные задания *
+
+- [x] Все необязательные и самостоятельные задания
+
+<details>
+<summary> <b>Основное задание №1  - Подготовка среды</b></summary>
+- Регистрация нового аккаунта в gcp.
+- Настройка управления gcp на локальной машине:
+https://cloud.google.com/storage/docs/gsutil_install?hl=ru
+- Ручное создание кластера k8s кластера в gcp, подключение к нему:
+<pre>
+gcloud container clusters get-credentials gke-cluster --zone europe-west3-c --project geometric-orbit-325713
+</pre>
+
+<pre>
+Отобразить текущий Контекст:
+$ kubectl config current-context
+Вывести список всех Контекстов из файла kubeconfig:
+$ kubectl config get-contexts
+kubectl config get-contexts                                                                                                                              
+(gke_cluster # ) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-templating/cert-manager# kubectl config get-contexts
+
+CURRENT   NAME          CLUSTER       AUTHINFO                         NAMESPACE
+          bgd_cluster   bgd_cluster   kubernetes-admin-cluster.local   
+*         gke_cluster   gke_cluster   gke_cluster                      
+          kind-bob      kind-kind     kind-bob                         
+          kind-dave     kind-kind     kind-dave                        
+          kind-kind     kind-kind     kind-kind  
+Сменить Контекст:
+$ kubectl config use-context <context_name>
+
+Убрать контекст:
+#kubectl config unset current-context
+</pre>
+- Установка Helm3: brew install helm
+<pre>
+#helm version                                
+version.BuildInfo{Version:"v3.6.3", GitCommit:"d506314abfb5d21419df8c7e7e68012379db2354", GitTreeState:"dirty", GoVersion:"go1.16.6"}
+</pre>
+- Добавление репы Helm:
+<pre>
+#helm repo add stable https://kubernetes-charts.storage.googleapis.com                                
+Error: repo "https://kubernetes-charts.storage.googleapis.com" is no longer available; try "https://charts.helm.sh/stable" instead
+#helm repo add stable https://charts.helm.sh/stable                                            
+"stable" already exists with the same configuration, skipping
+
+antonchudin@mir ~/otus/chudinanton_platform/kubernetes-templating
+# helm repo list                                                                            
+NAME            URL                              
+stable          https://charts.helm.sh/stable    
+jetstack        https://charts.jetstack.io       
+harbor          https://helm.goharbor.io         
+metallb         https://metallb.github.io/metallb
+</pre>
+- Изменил промт для отображения контекста клонировав:
+
+https://github.com/jonmosco/kube-ps1
+<pre>
+#mcedit ~/.zshrc
+...
+source ~/kube-ps1/kube-ps1.sh
+...
+
+#mcedit .oh-my-zsh/themes/alanpeabody.zsh-theme
+...
+PROMPT2="${user} ${pwd}# "
+PROMPT='$(kube_ps1)'$PROMPT2
+...
+</pre>
+Теперь будет виден контекст при подключении к кластеру.
+
+</details>
+
+
+<details>
+<summary> <b>Основное задание №2 - nginx-ingress</b></summary>
+- Переключаемся в нужный контекст 
+<pre>
+#kubectl config use-context gke_cluster
+#kubectl create ns nginx-ingress
+#kubectl get namespaces
+#helm upgrade --install nginx-ingress stable/nginx-ingress --wait  --namespace=nginx-ingress --version=1.41.3
+</pre>
+Смотрим внешний ip:
+<pre>
+#kubectl get service --namespace nginx-ingress
+NAME                          TYPE           CLUSTER-IP   EXTERNAL-IP     PORT(S)                      AGE
+nginx-ingress-nginx-ingress   LoadBalancer   10.12.7.69   34.89.236.114   80:32701/TCP,443:30307/TCP   86m
+</pre>
+</details>
+<details>
+<summary> <b>Основное задание №3 - cert-manager</b></summary>
+- Переключаемся в нужный контекст 
+Добавим репозиторий, в котором хранится актуальный helm chart certmanager:
+<pre>
+#helm repo add jetstack https://charts.jetstack.io
+</pre>
+Также для установки cert-manager предварительно потребуется создать
+в кластере некоторые CRD ( на документацию по установке):
+
+https://github.com/jetstack/cert-manager/tree/master/deploy/charts/cert-manager
+Соответственно создаем namespace cert-manager и установим cert-manager через HELM вместе с CRD:
+<pre>
+#kubectl create namespace cert-manager
+#kubectl get namespaces 
+#helm install cert-manager jetstack/cert-manager --namespace cert-manager --version v1.5.2 --set installCRDs=true
+#
+#kubectl get service --namespace cert-manager
+NAME                   TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+cert-manager           ClusterIP   10.12.14.152   <none>        9402/TCP   88m
+cert-manager-webhook   ClusterIP   10.12.12.41    <none>        443/TCP    88m
+</pre>
+
+Для инициирования процедуры заказа сертификата в кластере должны быть объявлены ресурсы центров сертификации (CA): 
+- Issuer или ClusterIssuer, — которые используются для подписи CSR (запросов на выпуск сертификата). 
+Отличие первого ресурса от второго — в области видимости:
+Issuer может использоваться в рамках одного пространства имен,
+ClusterIssuer является глобальным объектом кластера.
+
+Выберем ClusterIssuer
+
+Примечание: у Let’s Encrypt существуют довольно строгие лимиты на запросы к ACME-серверам. Чтобы не попасть в длительный бан, для отладки рекомендуется использовать тип сертификата letsencrypt-staging (отличие только в ACME-сервере).
+Я выбираю production. Делаем cluster_issuer.yaml в соответствующей папке cert-manager.
+Также добавил stage для тестирования.
+
+<pre>
+#kubectl apply -f cert-manager/cluster_issuer.yaml
+#kubectl get clusterissuer --namespace cert-manager
+NAME                     READY   AGE
+letsencrypt-production   True    88m
+letsencrypt-stage        True    42m
+</pre>
+
+</details>
+<details>
+<summary> <b>Основное задание №4 - chartmuseum</b></summary>
+- Создаем папку chartmuseum и файл values.yaml
+- Включаем в нем создание ingress ресурса с корректным hosts.name (должен
+использоваться nginx-ingress) и автоматическую генерацию Let's Encrypt сертификата
+Соответственно меняем в файле:
+<pre>
+ingress:
+  enabled: true
+</pre>
+- Добавляем аннотации где задаем ingress и cluster-issuer
+<pre>
+ annotations:
+ kubernetes.io/ingress.class: nginx
+ kubernetes.io/tls-acme: "true"
+ cert-manager.io/cluster-issuer: "letsencrypt-production"
+ cert-manager.io/acme-challenge-type: http01
+</pre>
+- Указываем хост
+<pre>
+  hosts:
+    - name: chartmuseum.yogatour.su
+      path: /
+      tls: true
+      tlsSecret: chartmuseum.yogatour.su
+</pre>
+
+Разрешаем обращение к API:
+
+<pre>
+   # disable all routes prefixed with /api
+    DISABLE_API: false
+</pre>
+- Создаем ns и раскатываем там chartmuseum
+<pre>
+#kubectl create ns chartmuseum
+#helm upgrade --install chartmuseum chartmuseum/chartmuseum --wait \
+ --namespace=chartmuseum \
+ --version=3.1.0 \
+ -f kubernetes-templating/chartmuseum/values.yaml
+
+#helm ls -n chartmuseum
+NAME            NAMESPACE       REVISION        UPDATED                                 STATUS          CHART                   APP VERSION
+chartmuseum     chartmuseum     1               2021-09-14 14:48:24.442644 +0300 MSK    deployed        chartmuseum-2.13.2      0.12.0   
+</pre>
+chartmuseum работает с валидным сертификатом!
+
+!!!
+Чтобы не было проблемы с генерацией сертификата не забываем про аннотацию:
+!!!
+<pre>
+<b>acme.cert-manager.io/http01-edit-in-place: "true"</b>
+</pre>
+
+Просмотр сертификатов кластере:
+<pre>
+#kubectl get certificate --namespace chartmuseum
+NAME                      READY   SECRET                    AGE
+chartmuseum.yogatour.su   True    chartmuseum.yogatour.su   2m58s
+</pre>
+
+<pre>
+kubectl get secrets -n chartmuseum
+NAME                                TYPE                                  DATA   AGE
+chartmuseum                         Opaque                                0      3m26s
+chartmuseum.yogatour.su             kubernetes.io/tls                     2      3m25s
+default-token-5v4z9                 kubernetes.io/service-account-token   3      7m12s
+sh.helm.release.v1.chartmuseum.v1   helm.sh/release.v1                    1      3m26s
+</pre>
+
+</details>
+<details>
+<summary> <b>Доп. задание №1 - Научитесь работать с chartmuseum</b></summary>
+<pre>
+helm pull bitnami/redis
+curl --data-binary "@redis-15.3.2.tgz" https://chartmuseum.yogatour.su/api/charts
+helm repo add chartmuseum-gcp https://chartmuseum.yogatour.su
+helm search repo redis                                                                            ✹ ✭kubernetes-volumes 
+NAME                                    CHART VERSION   APP VERSION     DESCRIPTION                                       
+chartmuseum-gcp/redis                   15.3.2          6.2.5           Open source, advanced key-value store. It is of...
+stable/prometheus-redis-exporter        3.5.1           1.3.4           DEPRECATED Prometheus exporter for Redis metrics  
+stable/redis                            10.5.7          5.0.7           DEPRECATED Open source, advanced key-value stor...
+stable/redis-ha                         4.4.6           5.0.6           DEPRECATED - Highly available Kubernetes implem...
+stable/sensu                            0.2.5           0.28            DEPRECATED Sensu monitoring framework backed by...
+
+kubectl create ns redis-cluster-test
+helm install redis-cluster-test chartmuseum-gcp/redis --namespace=redis-cluster-test
+
+cd ../frontend
+helm package .
+curl --data-binary "@frontend-0.1.0.tgz" https://chartmuseum.yogatour.su/api/charts
+{"saved":true}
+</pre>
+
+</details>
+<details>
+<summary> <b>Самостоятельное задание №1 - Harbor</b></summary>
+Установка Harbor
+<pre>
+kubectl create ns harbor
+helm repo add harbor https://helm.goharbor.io
+helm install harbor harbor/harbor --namespace harbor -f kubernetes-templating/harbor/values.yaml
+kubectl get secrets -n harbor -l owner=helm
+NAME                           TYPE                 DATA   AGE
+sh.helm.release.v1.harbor.v1   helm.sh/release.v1   1      3m20s
+</pre>
+Ссылка на harbor:
+https://github.com/goharbor/harbor-helm
+
+Ссылка на работающий harbor в gcp:
+https://harbor.yogatour.su
+</details>
+
+<details>
+<summary> <b>Доп. задание №2 Используем helmfile | Задание со</b></summary>
+<pre>
+helm delete nginx-ingress --namespace=nginx-ingress
+helm delete cert-manager --namespace cert-manager
+helm delete harbor -n harbor
+brew install helmfile
+cd kubernetes-templating/helmfile
+helmfile sync
+helmfile destroy
+</pre>
+
+</details>
+
+<details>
+<summary> <b>Основное задание №5 Создаем свой helm chart</b></summary>
+<pre>
+helm create kubernetes-templating/hipster-shop
+kubectl create ns hipster-shop
+helm upgrade --install hipster-shop kubernetes-templating/hipster-shop --namespace hipster-shop
+</pre>
+Запрошено больше ресурсов чем было выдано в gcloud.  Включил автоскейлинг нод. 
+
+Тестирование UI через port forwarding изнутри https://console.cloud.google.com/
+а также через Lens.
+
+Отдельный helm chart для frontenfd.
+
+<pre>
+helm create kubernetes-templating/frontend
+</pre>
+Выносим из hipster-shop deployment, service и создаем Ingress сразу с запросом сертификата.
+Применяем чарт hipster-shop для удаления из него вынесенного в отдельный чарт frontend, и затем применяем frontend чарт в том же --namespace hipster-shop
+<pre>
+helm upgrade hipster-shop kubernetes-templating/hipster-shop --namespace hipster-shop
+
+kubectl get secrets -n hipster-shop -l owner=helm                                                                             
+NAME                                 TYPE                 DATA   AGE
+sh.helm.release.v1.frontend.v1       helm.sh/release.v1   1      3m34s
+sh.helm.release.v1.hipster-shop.v1   helm.sh/release.v1   1      50m
+sh.helm.release.v1.hipster-shop.v2   helm.sh/release.v1   1      39m
+sh.helm.release.v1.hipster-shop.v3   helm.sh/release.v1   1      9m14s
+
+helm upgrade --install frontend kubernetes-templating/frontend --namespace hipster-shop
+
+https://shop.yogatour.su/
+</pre>
+
+Параметризовывыем наш чарт.
+<pre>
+image:
+  tag: v0.1.3
+
+replicas: 1
+
+service:
+  port: 80
+  targetPort: 8079
+  NodePort: 30001
+  type: NodePort
+</pre>
+
+Условие делаем через IF
+<pre>
+{{ if eq .Values.service.type "NodePort" }}nodePort: {{ .Values.service.NodePort }}{{ end }}
+</pre>
+
+Не забываем про порты на котором работает контейнер.
+</details>
+<details>
+<summary> <b>Доп. задание №3 Redis используя community chart's. | Задание со</b></summary>
+Создаем свой helm chart | Задание со ⭐
+Доп. задание про вынос redis'a на community chart's от Bitnami
+<pre>
+helm repo add bitnami https://charts.bitnami.com/bitnami
+</pre>
+Указываем зависимость и пересобираем чарт:
+<pre>
+....
+  - name: redis 
+    version: 15.3.2 
+    repository: https://charts.bitnami.com/bitnami
+....
+helm dep update kubernetes-templating/hipster-shop
+</pre>
+
+
+</details>
+
+<details>
+<summary> <b>Работа с helm-secrets | Необязательное задание</b></summary>
+
+Установка необходимых компонентов:
+<pre>
+brew install sops
+brew install gnupg2
+brew install gnu-getopt
+brew install gpg
+helm plugin install https://github.com/jkroepke/helm-secrets
+</pre>
+
+Сгенерируем новый PGP ключ:
+<pre>
+gpg --full-generate-key 
+</pre>
+
+Шифруем файл:
+<pre>
+sops -e -i --pgp 5673F6CBC1CFBC24AEDE5CCF1F6E790F209DDF99 kubernetes-templating/frontend/secrets.yaml
+gpg --export-secret-keys >~/.gnupg/secring.gpg
+</pre>
+
+Смотрим (предварительно фиксим багу):
+
+https://www.gnupg.org/documentation/manuals/gnupg/Invoking-GPG_002dAGENT.html
+<pre>
+mcedit .zshrc
+
+.....
+GPG_TTY=$(tty)
+export GPG_TTY
+
+helm secrets view kubernetes-templating/frontend/secrets.yaml
+sops -d kubernetes-templating/frontend/secrets.yaml
+</pre>
+
+
+Добавляем kubernetes-templating/frontend/templates/secret.yaml и передаем в него через переменную {{ .Values.visibleKey | b64enc | quote }} данные из kubernetes-templating/frontend/secrets.yaml
+и запихиваем в наш hipster-shop уже развернутый в gcp.
+<pre>
+helm secrets upgrade --install hipster-shop kubernetes-templating/frontend --namespace hipster-shop \
+ -f kubernetes-templating/frontend/values.yaml \
+ -f kubernetes-templating/frontend/secrets.yaml
+</pre>
+
+Проверяем секрет на соответствие значения. Можно через Lens, а можно через команду чтоб не разлениться:
+
+<pre>
+kg secrets secret -n hipster-shop -o "jsonpath={.data.visibleKey}" | base64 -D
+</pre>
+</details>
+<details>
+<summary> <b>Подключаем GCP KMS | Необязательное
+задание</b></summary>
+
+
+<pre>
+gcloud kms keyrings create sops --location global
+gcloud kms keys create sops-key --location global --keyring sops --purpose encryption
+gcloud kms keys list --location global --keyring sops
+
+NAME                                                                                PURPOSE          ALGORITHM                    PROTECTION_LEVEL  LABELS  PRIMARY_ID  PRIMARY_STATE
+projects/geometric-orbit-325713/locations/global/keyRings/sops/cryptoKeys/sops-key  ENCRYPT_DECRYPT  GOOGLE_SYMMETRIC_ENCRYPTION  SOFTWARE                  1           ENABLED
+</pre>
+
+Далее нужно настроить сервис аккаунт по следующей инструкции:
+
+https://cloud.google.com/docs/authentication/production#auth-cloud-explicit-csharp
+
+Не забываем про (через тильду не взлетело)
+<pre>
+export GOOGLE_APPLICATION_CREDENTIALS="/Users/antonchudin/.ssh/chudinanton-gcp-key.json"
+
+А лучше запихать в .zshrc
+
+GOOGLE_APPLICATION_CREDENTIALS="/Users/antonchudin/.ssh/chudinanton-gcp-key.json"
+export GOOGLE_APPLICATION_CREDENTIALS
+
+</pre>
+
+Поможет следующая документация:
+
+https://gofore.com/very-secret-development-operations-part-ii-storing-skeletons-into-a-version-control/
+
+https://github.com/mozilla/sops#using-sops-yaml-conf-to-select-kms-pgp-for-new-files
+
+https://github.com/mozilla/sops#encrypting-using-gcp-kms
+
+Cоздаю тестовый проект
+<pre>
+mkdir kubernetes-templating/kms
+</pre>
+
+Создаем шаблоны шифрования и расшифровывания в .sops.yaml:
+<pre>
+creation_rules:
+  # Staging
+  - path_regex: staging/.*\.enc(\.yaml|\.json)?$
+    gcp_kms: projects/geometric-orbit-325713/locations/global/keyRings/sops/cryptoKeys/sops-key
+
+  # Global enc-files (typically for testing and dev-environment)
+  - path_regex: .*\.enc(\.yaml|\.json)?$
+    gcp_kms: projects/geometric-orbit-325713/locations/global/keyRings/sops/cryptoKeys/sops-key
+</pre>
+
+Пример шифрования и расшифровывания с использованием gcp_kms:
+<pre>
+sops -e staging.prod.enc.yaml > prod.enc.yaml
+
+cat prod.enc.yaml
+
+
+visibleKey: ENC[AES256_GCM,data:UQHXrugXIL2O,iv:06WFEehgF031BzU4a+G+SjZZL3G/Sb63cDeVscYoeEM=,tag:N+zEB2clz+a0zZNBzTv4CA==,type:int]
+sops:
+    kms: []
+    gcp_kms:
+        - resource_id: projects/geometric-orbit-325713/locations/global/keyRings/sops/cryptoKeys/sops-key
+          created_at: "2021-09-15T19:13:36Z"
+          enc: CiQAK/B0ZcxDqdDnEfdCH7PU2cw5m9IMpJ9WMjjG6hYHHb/fCagSSQBnrCMehpvVlPHz99H9ACX+m7Gpk0eRcAWBdDjtnhyWTXsib8CqvDucZLt8qxEf1pEKr0y61cy8zcJNcsJsThbEYGqE3gFdiUI=
+    azure_kv: []
+    hc_vault: []
+    age: []
+    lastmodified: "2021-09-15T19:13:36Z"
+    mac: ENC[AES256_GCM,data:+zDUD8V9gYICXjt2+13NZzHGfapuHJ3jYLgayS1t4J35SMXiWZ9ykRWd5OQGF+SVHb/Y1XN2baXJLBCZPUJz//c5TCZPi/OISkV8UVlaYoSNWKRJ6dGJcOW4FrhjVXw0Hj+pJKvI4VzgujHGrp9Jh1qFJTEUz30bi0V13DkW/Dk=,iv:J9cWIDewaVhsocquHREQxYWteO+U+tHoaNe8Xdh73Uc=,tag:TFYVg8g+zgPjjiANs99ppA==,type:str]
+    pgp: []
+    unencrypted_suffix: _unencrypted
+    version: 3.7.1
+
+
+sops -d prod.enc.yaml > s2.prod.enc.yaml
+
+</pre>
+
+Для того чтобы автоматизировать шифрование секретов и не коммитить их в репу можно настроить pre-commit-hook
+Прекрасно описано здесь:
+
+https://gofore.com/very-secret-development-operations-part-ii-storing-skeletons-into-a-version-control/
+
+</details>
+
+
+<details>
+<summary> <b>Проверка</b></summary>
+Загружаем два чарта в Harbor
+<pre>
+helm repo add templating https://harbor.yogatour.su/chartrepo/kubernetes-templating
+"templating" has been added to your repositories
+
+helm search repo hipster                                                               
+NAME                   	CHART VERSION	APP VERSION	DESCRIPTION                
+templating/hipster-shop	0.1.0        	1.16.0     	A Helm chart for Kubernetes
+
+helm search repo frontend
+NAME                    	CHART VERSION	APP VERSION	DESCRIPTION                                       
+chartmuseum-gcp/frontend	0.1.0        	1.16.0     	A Helm chart for Kubernetes                       
+templating/frontend     	0.1.1        	1.16.0     	A Helm chart for Kubernetes                       
+stable/phpmyadmin       	4.3.5        	5.0.1      	DEPRECATED phpMyAdmin is an mysql administratio...
+</pre>
+</details>
+
+<details>
+<summary> <b>Основное задание №6 Kubecfg</b></summary>
+Выносим два сервиса из all-hipster-shop.yaml и помещаем их в в папку kubecfg
+
+Добиваемся неработоспособности корзины в https://shop.yogatour.su/cart
+
+Устанавливаем kubecfg
+<pre>
+brew install kubecfg
+kubecfg version
+
+kubecfg version: v0.20.0
+jsonnet version: v0.16.0
+client-go version: v0.0.0-master+886ea66
+</pre>
+
+Для начала в файле мы должны указать libsonnet библиотеку, которую будем использовать для генерации манифестов. В домашней работе воспользуемся готовой от bitnami
+Загрузил в корень kubecfg и поправил верисию  Deployment
+<pre>
+  Deployment(name): $._Object("apps/v1", "Deployment", name) {
+</pre>
+
+Проверяем, применяем и проверяем работу корзины с доставкой.
+<pre>
+kubecfg update services.jsonnet --namespace hipster-shop                                             
+INFO  Validating services paymentservice
+INFO  validate object "/v1, Kind=Service"
+INFO  Validating deployments paymentservice
+INFO  validate object "apps/v1, Kind=Deployment"
+INFO  Validating deployments shippingservice
+INFO  validate object "apps/v1, Kind=Deployment"
+INFO  Validating services shippingservice
+INFO  validate object "/v1, Kind=Service"
+INFO  Fetching schemas for 4 resources
+INFO  Creating services paymentservice
+INFO  Creating services shippingservice
+INFO  Creating deployments paymentservice
+INFO  Creating deployments shippingservice
+
+curl -I https://shop.yogatour.su/cart                                                                                                                   
+HTTP/1.1 200 OK
+Server: nginx/1.21.0
+Date: Wed, 15 Sep 2021 21:11:27 GMT
+Content-Type: text/html; charset=utf-8
+Connection: keep-alive
+Set-Cookie: shop_session-id=cf556a67-ed34-47ee-bbb4-33a6210b8cef; Max-Age=172800
+</pre>
+
+</details>
+
+<details>
+<summary> <b>Доп. задание №4 - Qbec</b></summary>
+Будем выпиливать сервис currencyservice и использовать Qbec. Он описан более понятно, чем Kapitan.
+
+Документация:
+
+https://qbec.io/userguide/tour/
+
+Установка:
+<pre>
+brew tap splunk/tap
+brew install qbec
+</pre>
+
+Инициализация шаблона с примером:
+<pre>
+qbec init currencyservice --with-example                                                 
+using server URL "https://34.107.24.126" and default namespace "default" for the default environment
+wrote currencyservice/params.libsonnet
+wrote currencyservice/environments/base.libsonnet
+wrote currencyservice/environments/default.libsonnet
+wrote currencyservice/components/hello.jsonnet
+wrote currencyservice/qbec.yaml
+</pre>
+
+Переводим шаблон сервиса из yaml в json и кладем его в currencyservice/components/currencyservice.jsonnet:
+
+https://www.convertjson.com/yaml-to-json.htm
+
+И вспоминаем зачем нужен шаблон, параметризуем его. По умолчанию создается два окружения base и default.
+
+<pre>
+params.name
+params.image
+params.containterPort
+params.cpu_requests
+params.memory_requests
+params.cpu_limits
+params.memory_limits
+params.servicePort
+</pre>
+
+Значения по умолчанию берутся из base.libsonnet. Вносим в него вышеуказанные значения.
+Значения для default окружения немного изменим и поменяем cpu_limits и memory_limits для теста.
+
+Validate, diff, and apply
+
+https://qbec.io/userguide/tour/#validate-diff-and-apply
+
+<pre>
+qbec validate base                                                             
+setting cluster to gcp-cluster
+setting context to gcp-cluster
+cluster metadata load took 1.741s
+1 components evaluated in 5ms
+✔ deployments currencyservice -n hipster-shop (source currencyservice) is valid
+✔ services currencyservice -n hipster-shop (source currencyservice) is valid
+---
+stats:
+  valid: 2
+
+command took 2.04s
+
+qbec validate default                                                         
+setting cluster to gcp-cluster
+setting context to gcp-cluster
+cluster metadata load took 365ms
+1 components evaluated in 5ms
+✔ services currencyservice -n hipster-shop (source currencyservice) is valid
+✔ deployments currencyservice -n hipster-shop (source currencyservice) is valid
+---
+stats:
+  valid: 2
+
+command took 980ms
+</pre>
+<pre>
+qbec show default
+</pre>
+
+Без сервиса currencyservice сайт чет приуныл:
+
+<pre>
+rpc error: code = Unavailable desc = all SubConns are in TransientFailure, latest connection error: connection error: desc = "transport: Error while dialing dial tcp: lookup currencyservice on 10.12.0.10:53: no such host"
+could not retrieve currencies
+</pre>
+
+Раскатываем его через qbec:
+<pre>
+cd kubernetes-templating/jsonnet/currencyservice
+qbec apply default                                                    
+setting cluster to gcp-cluster
+setting context to gcp-cluster
+cluster metadata load took 356ms
+1 components evaluated in 6ms
+
+will synchronize 2 object(s)
+
+Do you want to continue [y/n]: y
+1 components evaluated in 3ms
+update deployments currencyservice -n hipster-shop (source currencyservice)
+waiting for deletion list to be returned
+server objects load took 721ms
+---
+stats:
+  same: 1
+  updated:
+  - deployments currencyservice -n hipster-shop (source currencyservice)
+
+waiting for readiness of 1 objects
+  - deployments currencyservice -n hipster-shop
+
+  0s    : deployments currencyservice -n hipster-shop :: 1 old replicas are pending termination
+✓ 7s    : deployments currencyservice -n hipster-shop :: successfully rolled out (0 remaining)
+
+✓ 7s: rollout complete
+command took 10.09s
+</pre>
+
+Получилось не с первого раза, но взлетело :) и сайт ожил.
+</details>
+
+<details>
+<summary> <b>Самостоятельное задание №2 Kustomize</b></summary>
+
+Выпиливаю adservice. 
+
+Ставим Kustomize
+
+https://kustomize.io/
+
+https://kubectl.docs.kubernetes.io/installation/kustomize/homebrew/
+
+<pre>
+brew install kustomize
+</pre>
+
+Краткое введение в Kustomize
+
+https://habr.com/ru/company/flant/blog/469179/
+
+По аналогии c хабром сделаем:
+
+<pre>
+- base
+  - deployment.yaml
+  - service.yaml
+  - kustomization.yaml
+- overlays
+  - dev
+    - kustomization.yaml
+  - staging
+    - kustomization.yaml
+  - prod
+    - kustomization.yaml
+</pre>
+
+<pre> 
+tree                                                
+.
+|-- base
+|   |-- adservice-deployment.yaml
+|   |-- adservice-service.yaml
+|   `-- kustomization.yaml
+`-- overlays
+    |-- hipster-shop
+    |   `-- kustomization.yaml
+    `-- hipster-shop-prod
+        `-- kustomization.yaml
+</pre>
+
+Окружения должны отличаться:
+- Набором labels во всех манифестах
+- Префиксом названий ресурсов
+
+<pre>
+
+</pre>
+
+Проверяем окружения и деплоим:
+
+<pre>
+kustomize build kubernetes-templating/kustomize/overlays/hipster-shop/
+kustomize build kubernetes-templating/kustomize/overlays/hipster-shop-prod/
+kustomize build kubernetes-templating/kustomize/overlays/hipster-shop/ | kubectl apply -f -
+kubectl create ns hipster-shop-prod
+kustomize build kubernetes-templating/kustomize/overlays/hipster-shop-prod/ | kubectl apply -f -
+</pre>
+
+Поскольку окружения hipster-shop и hipster-shop-prod отличаются от нашего варианта либо namespace либо префиксом сделаем для теста еще stage где не будем ставить префикс.
+
+<pre>
+kustomize build kubernetes-templating/kustomize/overlays/hipster-shop-stage
+kustomize build kubernetes-templating/kustomize/overlays/hipster-shop-stage  | kubectl apply -f -
+</pre>
+
+Проверяем в UI работу нашего приунывшего сервиса:
+<pre>
+https://shop.yogatour.su/
+Advertisement: Vintage camera lens for sale. 20% off.
+
+kg deployments.apps -A | grep adservice                                                                                     
+hipster-shop-prod   prod-adservice                             1/1     1            1           69s
+hipster-shop        adservice                                  1/1     1            1           17m
+hipster-shop        dev-adservice                              1/1     1            1           26m
+</pre>
+
+</details>
+
+</details>
+
+
+
+<details>
 <summary> <b>ДЗ №5 - kubernetes-volumes (Хранение данных в Kubernetes: Volumes, Storages, Statefull-приложения)</b></summary>
 
 - [x] Основное ДЗ

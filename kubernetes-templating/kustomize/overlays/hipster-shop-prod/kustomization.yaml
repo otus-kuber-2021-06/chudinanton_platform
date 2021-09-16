@@ -1,0 +1,6 @@
+resources:
+- ../../base
+namePrefix: prod-
+commonLabels:
+  environment: prod
+namespace: hipster-shop-prod

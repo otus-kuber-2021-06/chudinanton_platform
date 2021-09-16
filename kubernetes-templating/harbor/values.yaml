@@ -1,0 +1,19 @@
+expose:
+  type: ingress
+  tls:
+    enabled: true
+    secretName: "harbor.yogatour.su"
+    commonName: ""
+  ingress:
+    hosts:
+      core: harbor.yogatour.su
+    controller: default
+    annotations:
+      kubernetes.io/ingress.class: nginx
+      kubernetes.io/tls-acme: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-production"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      acme.cert-manager.io/http01-edit-in-place: "true"
+notary:
+  enabled: false
+harborAdminPassword: "Harbor12345"
