@@ -1,0 +1,4 @@
+resources:
+- adservice-deployment.yaml
+- adservice-service.yaml
+namespace: hipster-shop

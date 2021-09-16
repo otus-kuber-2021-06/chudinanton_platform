@@ -1,0 +1,8 @@
+creation_rules:
+  # Staging
+  - path_regex: staging/.*\.enc(\.yaml|\.json)?$
+    gcp_kms: projects/geometric-orbit-325713/locations/global/keyRings/sops/cryptoKeys/sops-key
+
+  # Global enc-files (typically for testing and dev-environment)
+  - path_regex: .*\.enc(\.yaml|\.json)?$
+    gcp_kms: projects/geometric-orbit-325713/locations/global/keyRings/sops/cryptoKeys/sops-key

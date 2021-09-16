@@ -1,0 +1,15 @@
+visibleKey: ENC[AES256_GCM,data:jssOd18+QZWA,iv:qW/R+ctH9D0GsebIhJ3VWwO1h7gNV0RbXQWcnuwfaEU=,tag:/jLp3WpDpRv9jRpRuN3e0Q==,type:int]
+sops:
+    kms: []
+    gcp_kms:
+        - resource_id: projects/geometric-orbit-325713/locations/global/keyRings/sops/cryptoKeys/sops-key
+          created_at: "2021-09-15T19:13:48Z"
+          enc: CiQAK/B0ZRQRYnul88D4/K40p3LXEHZfE5m2w0TjUnSRv1CA3KgSSQBnrCMeMsjCv3Jua9bWV/KDh0zN2NjLFzk0l48WHzzzlwHJc1ZQj2NTxWgP0OYAQryKMTgSbScaH0oEP8juDvhN2KyUVQdbTOI=
+    azure_kv: []
+    hc_vault: []
+    age: []
+    lastmodified: "2021-09-15T19:13:48Z"
+    mac: ENC[AES256_GCM,data:OLIp+e7n7IbSryykNyP/Ym6Lql0t5hRAxQ+NmZdPzo7b0pbqS5GdH2ihUbupxlA8PJr+2RYm7fanEq2ypwVyFcm37ujJmInj1y8WFRYwMi+9NloC1nUdwt/LsOuAB2LeR56Xi874rQWZlMUzG6vWcEVOLeKld0+/khp8DR06SVg=,iv:DsaLM1LvXaAkGK9+HEMGSS5EZGhdTVf/MhOMnCbsZEY=,tag:iz9h7ylMrrXVlsd7fW/5ZA==,type:str]
+    pgp: []
+    unencrypted_suffix: _unencrypted
+    version: 3.7.1
