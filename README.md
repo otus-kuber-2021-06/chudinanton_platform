@@ -1,6 +1,185 @@
 # chudinanton_platform
 chudinanton Platform repository
 <details>
+<summary> <b>ДЗ №8 - kubernetes-monitoring (Мониторинг сервиса в кластере k8s)</b></summary>
+
+- [x] Основное ДЗ
+
+<details>
+<summary> <b>Основное задание</b></summary>
+
+Ставим prometheus-operator через Helm3
+
+Документация:
+https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack#configuration
+
+<pre>
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+kubectl create ns monitoring
+helm upgrade --install prometheus-operator prometheus-community/prometheus-operator -n monitoring
+
+kg deployments,rs,po -n monitoring
+NAME                                                     READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/prometheus-operator-grafana              1/1     1            1           14m
+deployment.apps/prometheus-operator-kube-state-metrics   1/1     1            1           14m
+deployment.apps/prometheus-operator-operator             1/1     1            1           14m
+
+NAME                                                               DESIRED   CURRENT   READY   AGE
+replicaset.apps/prometheus-operator-grafana-7c7599754              1         1         1       14m
+replicaset.apps/prometheus-operator-kube-state-metrics-bd8f49464   1         1         1       14m
+replicaset.apps/prometheus-operator-operator-7dfc554db             1         1         1       14m
+
+NAME                                                         READY   STATUS    RESTARTS   AGE
+pod/alertmanager-prometheus-operator-alertmanager-0          2/2     Running   0          14m
+pod/prometheus-operator-grafana-7c7599754-d5pcx              2/2     Running   0          14m
+pod/prometheus-operator-kube-state-metrics-bd8f49464-8hqpn   1/1     Running   0          14m
+pod/prometheus-operator-operator-7dfc554db-5kbs6             2/2     Running   0          14m
+pod/prometheus-operator-prometheus-node-exporter-6jl5q       1/1     Running   0          14m
+pod/prometheus-operator-prometheus-node-exporter-9bsmd       1/1     Running   0          14m
+pod/prometheus-operator-prometheus-node-exporter-g7qjh       1/1     Running   0          14m
+pod/prometheus-operator-prometheus-node-exporter-zvh8t       1/1     Running   0          14m
+pod/prometheus-prometheus-operator-prometheus-0              3/3     Running   1          14m
+</pre>
+
+Собираем образ nginx. Для этого берем из оф. хаба образ nginx:1.21.3-alpine и подсовываем ему конфиг metrics.conf с нужным location.
+Выдумывать ничего не будем, задание предельно простое. Однако отдавать метрики по общедоступному извне порту не тру.
+Будем отдавать по 8080.
+
+Dockerfile
+
+<pre>
+FROM nginx:1.21.3-alpine
+COPY metrics.conf /etc/nginx/conf.d/metrics.conf
+CMD ["nginx", "-g", "daemon off;"]
+</pre>
+
+Собираем и пушим
+
+<pre>
+docker build -t chudinanton/nginx:v.0.0.1 .
+docker push chudinanton/nginx:v.0.0.1
+</pre>
+
+### Деплоим nginx, nginx-exporter, сервисы и servicemonitor
+
+Экспортер NGINX Prometheus извлекает метрики из одного NGINX или NGINX Plus, конвертирует метрики в соответствующие типы метрик Prometheus и, наконец, предоставляет их через HTTP-сервер для сбора Prometheus.
+
+Документация по nginx-prometheus-exporter -nginx.scrape-uri
+
+https://github.com/nginxinc/nginx-prometheus-exporter#running-the-exporter-in-a-docker-container
+
+Аргументы для nginx-prometheus-exporter
+
+https://github.com/nginxinc/nginx-prometheus-exporter#command-line-arguments
+
+Поместим nginx-prometheus-exporter внутрь нашего пода в качестве sidecar контейнера.
+
+<pre>
+      - name: nginx-prometheus-exporter
+        image: nginx/nginx-prometheus-exporter:0.9.0
+        env:
+          - name: SCRAPE_URI
+            value: "http://127.0.0.1:8080/basic_status"
+        ports:
+        - containerPort: 9113
+</pre>
+
+Публикуем манифесты:
+
+<pre>
+ka deployment.yaml
+ka service.yaml
+ka servicemonitor.yaml
+
+kg deployments,rs,po,svc,ServiceMonitor
+NAME                            READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/nginx-metrics   3/3     3            3           4m41s
+
+NAME                                       DESIRED   CURRENT   READY   AGE
+replicaset.apps/nginx-metrics-56ff8bff64   3         3         3       4m41s
+
+NAME                                 READY   STATUS    RESTARTS   AGE
+pod/nginx-metrics-56ff8bff64-9cr9h   2/2     Running   0          4m41s
+pod/nginx-metrics-56ff8bff64-kbl52   2/2     Running   0          4m41s
+pod/nginx-metrics-56ff8bff64-xxh8z   2/2     Running   0          4m41s
+
+NAME                    TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)           AGE
+service/kubernetes      ClusterIP   10.12.0.1    <none>        443/TCP           3d1h
+service/nginx-metrics   ClusterIP   10.12.2.0    <none>        80/TCP,9113/TCP   4m20s
+
+NAME                                                                 AGE
+servicemonitor.monitoring.coreos.com/nginx-metrics-service-monitor   3m21s
+</pre>
+
+Смотрим через Lens:
+
+<pre>
+http://localhost:54973/metrics
+
+# HELP nginx_connections_accepted Accepted client connections
+# TYPE nginx_connections_accepted counter
+nginx_connections_accepted 2
+# HELP nginx_connections_active Active client connections
+# TYPE nginx_connections_active gauge
+nginx_connections_active 1
+# HELP nginx_connections_handled Handled client connections
+# TYPE nginx_connections_handled counter
+nginx_connections_handled 2
+# HELP nginx_connections_reading Connections where NGINX is reading the request header
+# TYPE nginx_connections_reading gauge
+nginx_connections_reading 0
+# HELP nginx_connections_waiting Idle client connections
+# TYPE nginx_connections_waiting gauge
+nginx_connections_waiting 0
+# HELP nginx_connections_writing Connections where NGINX is writing the response back to the client
+# TYPE nginx_connections_writing gauge
+nginx_connections_writing 1
+# HELP nginx_http_requests_total Total http requests
+# TYPE nginx_http_requests_total counter
+nginx_http_requests_total 3
+# HELP nginx_up Status of the last metric scrape
+# TYPE nginx_up gauge
+nginx_up 1
+# HELP nginxexporter_build_info Exporter build information
+# TYPE nginxexporter_build_info gauge
+nginxexporter_build_info{commit="5f88afbd906baae02edfbab4f5715e06d88538a0",date="2021-03-22T20:16:09Z",version="0.9.0"} 1
+</pre>
+
+Можно войти и в сам prometheus и grafana со стандартным паролем через port forwarding. Но мы пойдем другим путем.
+
+Добавляем ингресс в графану через kube-prometheus-stack/values.yaml и обновляем
+
+<pre>
+helm upgrade --install prometheus-operator prometheus-community/prometheus-operator -n monitoring -f kubernetes-monitoring/kube-prometheus-stack/values.yaml
+</pre>
+
+Смотрим на графану
+
+https://grafana.yogatour.su/
+
+Реквизиты стандартные:
+
+<pre>
+admin
+prom-operator
+</pre>
+
+Импортируем дашборд:
+
+https://github.com/nginxinc/nginx-prometheus-exporter/tree/master/grafana
+
+
+Дашборд 
+![dashboards_nginx](kubernetes-monitoring/dashboards_nginx.png)
+
+Проверка:
+
+https://grafana.yogatour.su/d/MsjffzSZz/nginx?orgId=1&var-DS_PROMETHEUS=&var-instance=All&refresh=5s
+
+</details>
+</details>
+
+<details>
 <summary> <b>ДЗ №7 - kubernetes-operators (Операторы, CustomResourceDefinition)</b></summary>
 
 - [x] Основное ДЗ

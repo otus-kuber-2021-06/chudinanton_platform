@@ -1,0 +1,17 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nginx-metrics-service-monitor
+  namespace: default
+  labels:
+    release: prometheus-operator
+spec:
+  namespaceSelector:
+    matchNames:
+    - default 
+  selector:
+    matchLabels:
+      app: nginx-metrics
+  endpoints:
+    - port: nginx-prometheus-exporter
+      path: '/metrics'
