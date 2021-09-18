@@ -1,6 +1,513 @@
 # chudinanton_platform
 chudinanton Platform repository
 <details>
+<summary> <b>ДЗ №7 - kubernetes-operators (Операторы, CustomResourceDefinition)</b></summary>
+
+- [x] Основное ДЗ
+
+- [x] Создание оператора на Python
+
+- [ ] Все дополнительные задания *
+
+<details>
+<summary> <b>Основное задание №1  - Создаем CR и CRD</b></summary>
+
+Поднимаем minikube, важно указать версию!
+<pre>
+minikube start --driver=docker --kubernetes-version=v1.21.3
+minikube addons disable default-storageclass
+</pre>
+
+Создаем cr.yml и crd.yml
+
+<pre>
+kubectl apply -f deploy/crd.yml
+spec.versions[0].schema.openAPIV3Schema: Required value: schemas are required
+</pre>
+
+Меняем v1 на v1beta1
+И применяем.
+Создадим CRD:
+
+<pre>
+kubectl apply -f deploy/crd.yml
+Warning: apiextensions.k8s.io/v1beta1 CustomResourceDefinition is deprecated in v1.16+, unavailable in v1.22+; use apiextensions.k8s.io/v1 CustomResourceDefinition
+customresourcedefinition.apiextensions.k8s.io/mysqls.otus.homework created
+
+kubectl get crd
+NAME                   CREATED AT
+mysqls.otus.homework   2021-09-17T10:16:24Z
+
+</pre>
+
+Cоздаем CR:
+
+<pre>
+kubectl apply -f deploy/cr.yml
+mysql.otus.homework/mysql-instance created
+
+kubectl get mysqls.otus.homework
+NAME             AGE
+mysql-instance   2m4s
+</pre>
+
+### Validation
+
+Удалим наш инстанс:
+
+<pre>
+kubectl delete mysqls.otus.homework mysql-instance
+</pre>
+
+Чтобы валидация работала так как мы хотим, надо добавить в CRD также
+
+<pre>
+  preserveUnknownFields: false
+</pre>
+
+<pre>
+kubectl apply -f deploy/cr.yml                                                                             
+error: error validating "deploy/cr.yml": error validating data: ValidationError(MySQL): unknown field "usless_data" in homework.otus.v1.MySQL; if you choose to ignore these errors, turn validation off with --validate=false
+</pre>
+
+Убираем из deploy/cr.yml usless_data: "useless info", оно не описано в валидации.
+Применяем:
+
+<pre>
+kubectl apply -f deploy/cr.yml                                                                       
+mysql.otus.homework/mysql-instance created
+</pre>
+
+Задание по CRD:
+Если сейчас из описания mysql убрать строчку из спецификации, то манифест будет принят API сервером. Для того, чтобы этого избежать, добавьте описание обязательный полей в ustomResourceDefinition:
+
+<pre>
+          required: ["image", "database", "password", "storage_size"]     
+
+kubectl apply -f deploy/crd.yml                                                                           
+Warning: apiextensions.k8s.io/v1beta1 CustomResourceDefinition is deprecated in v1.16+, unavailable in v1.22+; use apiextensions.k8s.io/v1 CustomResourceDefinition
+customresourcedefinition.apiextensions.k8s.io/mysqls.otus.homework configured
+</pre>
+
+Проверяем (убираем одно значение для теста):
+
+<pre>
+kubectl apply -f deploy/cr.yml                                                                     
+error: error validating "deploy/cr.yml": error validating data: ValidationError(MySQL.spec): missing required field "password" in homework.otus.v1.MySQL.spec; if you choose to ignore these errors, turn validation off with --validate=false
+</pre>
+
+Cтавим необходимые питоновские библиотеки:
+<pre>
+pip install kopf jinja2 kubernetes
+</pre>
+
+Создаем папку build/templates и помещаем туда необходимые шаблоны
+
+<pre>
+mysql-deployment.yml.j2
+mysql-service.yml.j2
+mysql-pv.yml.j2
+mysql-pvc.yml.j2
+backup-pv.yml.j2
+backup-pvc.yml.j2
+backup-job.yml.j2
+restore-job.yml.j2
+</pre>
+
+Должно получиться, что-то похожее на:
+
+https://gist.githubusercontent.com/Evgenikk/581fa5bba6d924a3438be1e3d31aa468/raw/c7c0b8882550ab54d981a4941959276802fe0233/controller-1.py
+
+Я дополнительно проставил комментарии для понимания. В питоне разбираюсь не шибко.
+
+С такой конфигурацией уже должны обрабатываться события при создании cr.yml, проверим, для этого из папки build:
+
+<pre>
+(minikube # ) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-operators/build# kopf run mysql-operator.py                                                                      
+/usr/local/lib/python3.9/site-packages/kopf/_core/reactor/running.py:170: FutureWarning: Absence of either namespaces or cluster-wide flag will become an error soon. For now, switching to the cluster-wide mode for backward compatibility.
+  warnings.warn("Absence of either namespaces or cluster-wide flag will become an error soon."
+[2021-09-17 12:48:20,428] kopf._core.engines.a [INFO    ] Initial authentication has been initiated.
+[2021-09-17 12:48:20,448] kopf.activities.auth [INFO    ] Activity 'login_via_client' succeeded.
+[2021-09-17 12:48:20,448] kopf._core.engines.a [INFO    ] Initial authentication has finished.
+mysql-operator.py:12: YAMLLoadWarning: calling yaml.load() without Loader=... is deprecated, as the default Loader is unsafe. Please read https://msg.pyyaml.org/load for full details.
+  json_manifest = yaml.load(yaml_manifest)
+[2021-09-17 12:48:20,734] kopf.objects         [INFO    ] [default/mysql-instance] Handler 'mysql_on_create' succeeded.
+[2021-09-17 12:48:20,735] kopf.objects         [INFO    ] [default/mysql-instance] Creation is processed: 1 succeeded; 0 failed.
+</pre>
+
+> Вопрос: почему объект создался, хотя мы создали CR, до того, как запустили контроллер?
+> Ответ: как было сказано в лекции есть два триггера Edge Triggered & Level Triggered. В данном случае отрабатывает Level Triggered
+
+Если сделать kubectl delete mysqls.otus.homework mysql-instance , то CustomResource будет удален, но наш контроллер ничего не
+сделает т. к. обработки событий на удаление у нас нет.
+
+Удалим все ресурсы, созданные контроллером:
+
+<pre>
+kubectl delete mysqls.otus.homework mysql-instance
+kubectl delete deployments.apps mysql-instance
+kubectl delete pvc mysql-instance-pvc
+kubectl delete pv mysql-instance-pv
+kubectl delete svc mysql-instance
+</pre>
+
+Для удаления ресурсов, сделаем deployment,svc,pv,pvc дочерними ресурсами к mysql, для этого в тело функции mysql_on_create , после генерации json манифестов добавим:
+
+<pre>
+    # Определяем, что созданные ресурсы являются дочерними к управляемому CustomResource:
+    kopf.append_owner_reference(persistent_volume, owner=body)
+    kopf.append_owner_reference(persistent_volume_claim, owner=body)  # addopt
+    kopf.append_owner_reference(service, owner=body)
+    kopf.append_owner_reference(deployment, owner=body)
+    # ^ Таким образом при удалении CR удалятся все, связанные с ним pv,pvc,svc, deployments
+</pre>
+
+Добавляем обработку события удаления ресурса mysql в самый конец файла:
+
+<pre>
+@kopf.on.delete('otus.homework', 'v1', 'mysqls')
+def delete_object_make_backup(body, **kwargs):
+  return {'message': "mysql and its children resources deleted"}
+</pre>
+
+Актуальное состояние контроллера можно подсмотреть в
+
+https://gist.githubusercontent.com/Evgenikk/581fa5bba6d924a3438be1e3d31aa468/raw/8308e18203e191d0318f2f6d4ec6459b27e1b56e/controller-2.py
+
+Тестируем:
+
+<pre>
+kubectl apply -f ../deploy/cr.yml
+kopf run mysql-operator.py
+
+kg pv,deployment,pvc,svc -A
+NAME                                                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM                        STORAGECLASS   REASON   AGE
+persistentvolume/mysql-instance-pv                          1Gi        RWO            Retain           Available                                                        92s
+persistentvolume/pvc-25359ec1-8acf-48f2-bdd1-2ac244255974   1Gi        RWO            Delete           Bound       default/mysql-instance-pvc   standard                92s
+
+NAMESPACE     NAME                             READY   UP-TO-DATE   AVAILABLE   AGE
+default       deployment.apps/mysql-instance   0/1     1            0           92s
+kube-system   deployment.apps/coredns          1/1     1            1           3h46m
+
+NAMESPACE   NAME                                       STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+default     persistentvolumeclaim/mysql-instance-pvc   Bound    pvc-25359ec1-8acf-48f2-bdd1-2ac244255974   1Gi        RWO            standard       92s
+
+NAMESPACE     NAME                     TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)                  AGE
+default       service/kubernetes       ClusterIP   10.96.0.1    <none>        443/TCP                  3h46m
+default       service/mysql-instance   ClusterIP   None         <none>        3306/TCP                 92s
+kube-system   service/kube-dns         ClusterIP   10.96.0.10   <none>        53/UDP,53/TCP,9153/TCP   3h46m
+</pre>
+
+Теперь добавим создание pv, pvc для backup и restore job. Для этого после создания deployment добавим следующий код:
+
+<pre>
+    # Cоздаем PVC  и PV для бэкапов:
+    try:
+        backup_pv = render_template('backup-pv.yml.j2', {'name': name})
+        api = kubernetes.client.CoreV1Api()
+        print(api.create_persistent_volume(backup_pv))
+        api.create_persistent_volume(backup_pv)
+    except kubernetes.client.rest.ApiException:
+        pass
+
+    try:
+        backup_pvc = render_template('backup-pvc.yml.j2', {'name': name})
+        api = kubernetes.client.CoreV1Api()
+        api.create_namespaced_persistent_volume_claim('default', backup_pvc)
+    except kubernetes.client.rest.ApiException:
+        pass
+</pre>
+
+Конструкция try, except - это обработка исключений, в данном случае, нужна, чтобы наш контроллер не пытался бесконечно пересоздать pv и pvc для бэкапов, т. к. их жизненный цикл отличен от жизненного цикла mysql. 
+
+Далее нам необходимо реализовать создание бэкапов и восстановление из них. Для этого будут использоваться Job. Поскольку при запуске Job, повторно ее запустить нельзя, нам нужно реализовать логику удаления успешно законченных jobs c определенным именем.
+
+Для этого выше всех обработчиков событий (под функцией render_template) добавим следующую функцию:
+
+<pre>
+def delete_success_jobs(mysql_instance_name):
+    print("start deletion")
+    api = kubernetes.client.BatchV1Api()
+    jobs = api.list_namespaced_job('default')
+    for job in jobs.items:
+        jobname = job.metadata.name
+        if (jobname == f"backup-{mysql_instance_name}-job") or \
+                (jobname == f"restore-{mysql_instance_name}-job"):
+            if job.status.succeeded == 1:
+                api.delete_namespaced_job(jobname,
+                                          'default',
+                                          propagation_policy='Background')
+</pre>
+
+Также нам понадобится функция, для ожидания пока наша backup job завершится, чтобы дождаться пока backup выполнится перед удалением mysql deployment, svc, pv, pvc.
+
+<pre>
+def wait_until_job_end(jobname):
+    api = kubernetes.client.BatchV1Api()
+    job_finished = False
+    jobs = api.list_namespaced_job('default')
+    while (not job_finished) and \
+            any(job.metadata.name == jobname for job in jobs.items):
+        time.sleep(1)
+        jobs = api.list_namespaced_job('default')
+        for job in jobs.items:
+            if job.metadata.name == jobname:
+                print(f"job with { jobname }  found,wait untill end")
+                if job.status.succeeded == 1:
+                    print(f"job with { jobname }  success")
+                    job_finished = True
+</pre>
+
+Добавим запуск backup-job и удаление выполненных jobs в функцию delete_object_make_backup:
+
+<pre>
+@kopf.on.delete('otus.homework', 'v1', 'mysqls')
+def delete_object_make_backup(body, **kwargs):
+    name = body['metadata']['name']
+    image = body['spec']['image']
+    password = body['spec']['password']
+    database = body['spec']['database']
+
+    delete_success_jobs(name)
+
+    # Cоздаем backup job:
+    api = kubernetes.client.BatchV1Api()
+    backup_job = render_template('backup-job.yml.j2', {
+        'name': name,
+        'image': image,
+        'password': password,
+        'database': database})
+    api.create_namespaced_job('default', backup_job)
+    wait_until_job_end(f"backup-{name}-job")
+    return {'message': "mysql and its children resources deleted"}
+</pre>
+
+Актуальное состояние контроллера:
+
+https://gist.githubusercontent.com/Evgenikk/581fa5bba6d924a3438be1e3d31aa468/raw/bf3545bc96ddff423424b43c2c687e14242a13fb/controller-3.py
+
+Добавим генерацию json из шаблона для restore-job:
+
+<pre>
+    restore_job = render_template('restore-job.yml.j2', {
+        'name': name,
+        'image': image,
+        'password': password,
+        'database': database})
+</pre>
+
+Добавим попытку восстановиться из бэкапов после deployment mysql:
+
+<pre>
+    # Пытаемся восстановиться из backup
+    try:
+        api = kubernetes.client.BatchV1Api()
+        api.create_namespaced_job('default', restore_job)
+    except kubernetes.client.rest.ApiException:
+        pass
+</pre>
+
+Добавим зависимость restore-job от объектов mysql (возле других owner_reference):
+<pre>
+kopf.append_owner_reference(restore_job, owner=body)
+</pre>
+
+Вот и готово. Запускаем оператор (из директории build):
+
+<pre>
+kopf run mysql-operator.py
+</pre>
+
+Создаем CR:
+
+<pre>
+kubectl apply -f deploy/cr.yml
+</pre>
+
+Проверяем:
+
+Актуальное состояние контроллера:
+https://gist.githubusercontent.com/Konstantinov86/496dfa95154bc1b24a92ab9b347829fc/raw/3114468de9f0add1ae7afa58e81fee982267b374/controller-5.py
+
+В backup-pvc.yml.j2 не указан pv-usage, не думаю, что это "ошибка" :), диверсия скорее :)
+
+<pre>
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-{{ name }}-pvc
+spec:
+  accessModes:
+    - "ReadWriteOnce"
+  resources:
+    requests:
+      storage: 1Gi
+  selector:
+    matchLabels:
+      pv-usage: backup-{{ name }}
+</pre>
+
+<pre>
+kg pv,pvc
+NAME                                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                               STORAGECLASS   REASON   AGE
+persistentvolume/backup-mysql-instance-pv   1Gi        RWO            Retain           Bound    default/backup-mysql-instance-pvc                           29s
+persistentvolume/mysql-instance-pv          1Gi        RWO            Retain           Bound    default/mysql-instance-pvc                                  29s
+
+NAME                                              STATUS   VOLUME                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+persistentvolumeclaim/backup-mysql-instance-pvc   Bound    backup-mysql-instance-pv   1Gi        RWO                           29s
+persistentvolumeclaim/mysql-instance-pvc          Bound    mysql-instance-pv          1Gi        RWO                           29s
+</pre>
+
+Заполняем базу:
+
+<pre>
+export MYSQLPOD=$(kubectl get pods -l app=mysql-instance -o jsonpath="{.items[*].metadata.name}")
+kubectl exec -it $MYSQLPOD -- mysql -u root -potuspassword -e "CREATE TABLE test ( id smallint unsigned not null auto_increment, name varchar(20) not null, constraint pk_example primary key (id) );" otus-database
+kubectl exec -it $MYSQLPOD -- mysql -potuspassword -e "INSERT INTO test ( id, name ) VALUES (null, 'some data' );" otus-database
+kubectl exec -it $MYSQLPOD -- mysql -potuspassword -e "INSERT INTO test ( id, name ) VALUES (null, 'some data-2' );" otus-database
+</pre>
+
+Смотрим что получилось:
+
+<pre>
+kubectl exec -it $MYSQLPOD -- mysql -potuspassword -e "select * from test;" otus-database
+mysql: [Warning] Using a password on the command line interface can be insecure.
++----+-------------+
+| id | name        |
++----+-------------+
+|  1 | some data   |
+|  2 | some data-2 |
++----+-------------+
+</pre>
+
+Проверяем задание бэкапа при удалении:
+
+<pre>
+kubectl delete mysqls.otus.homework mysql-instance                                
+mysql.otus.homework "mysql-instance" deleted
+(minikube # N/A) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-operators/build# kg pv,pvc                                                                
+NAME                                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS     CLAIM                               STORAGECLASS   REASON   AGE
+persistentvolume/backup-mysql-instance-pv   1Gi        RWO            Retain           Bound      default/backup-mysql-instance-pvc                           117s
+persistentvolume/mysql-instance-pv          1Gi        RWO            Retain           Released   default/mysql-instance-pvc                                  117s
+
+NAME                                              STATUS   VOLUME                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+persistentvolumeclaim/backup-mysql-instance-pvc   Bound    backup-mysql-instance-pv   1Gi        RWO                           117s
+
+kg job
+NAME                        COMPLETIONS   DURATION   AGE
+backup-mysql-instance-job   1/1           1s         30s
+
+</pre>
+
+Создадим заново mysql-instance:
+<pre>
+kubectl apply -f ../deploy/cr.yml
+kg job
+NAME                         COMPLETIONS   DURATION   AGE
+backup-mysql-instance-job    1/1           1s         65s
+restore-mysql-instance-job   1/1           16s        19s
+</pre>
+
+Видим, что restore-mysql-instance-job выполнен и все данные на месте!
+
+<pre>
+kg job
+NAME                         COMPLETIONS   DURATION   AGE
+backup-mysql-instance-job    1/1           1s         65s
+restore-mysql-instance-job   1/1           16s        19s
+(minikube # N/A) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-operators/build# kgpo
+NAME                               READY   STATUS      RESTARTS   AGE
+backup-mysql-instance-job-xh987    0/1     Completed   0          107s
+mysql-instance-6785949c48-nrvg6    1/1     Running     0          61s
+restore-mysql-instance-job-tsr8h   0/1     Completed   2          61s
+(minikube # N/A) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-operators/build# export MYSQLPOD=$(kubectl get pods -l app=mysql-instance -o jsonpath="{.items[*].metadata.name}")
+
+(minikube # N/A) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-operators/build# kubectl exec -it $MYSQLPOD -- mysql -potuspassword -e "select * from test;" otus-database
+mysql: [Warning] Using a password on the command line interface can be insecure.
++----+-------------+
+| id | name        |
++----+-------------+
+|  1 | some data   |
+|  2 | some data-2 |
++----+-------------+
+</pre>
+
+
+Для решения проблемы
+<pre>
+HTTP response headers: HTTPHeaderDict({'Cache-Control': 'no-cache, private', 'Content-Type': 'application/json', 'X-Kubernetes-Pf-Flowschema-Uid': '59e0f613-106d-4cbb-8f87-f1f605b59802', 'X-Kubernetes-Pf-Prioritylevel-Uid': '65541d7a-7bc8-4395-90f2-ed3dad8cf301', 'Date': 'Fri, 17 Sep 2021 14:51:52 GMT', 'Content-Length': '238'})
+HTTP response body: {"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"persistentvolumes \"mysql-instance-pv\" already exists","reason":"AlreadyExists","details":{"name":"mysql-instance-pv","kind":"persistentvolumes"},"code":409}
+
+[2021-09-17 17:51:52,393] kopf.objects         [WARNING ] [default/mysql-instance] Patching failed with inconsistencies: (('remove', ('status',), {'kopf': {'progress': {'mysql_on_create': {'started': '2021-09-17T14:48:51.817429', 'stopped': None, 'delayed': '2021-09-17T14:52:52.380297', 'purpose': 'create', 'retries': 4, 'success': False, 'failure': False, 'message': '(409)\nReason: Conflict\nHTTP response headers: HTTPHeaderDict({\'Cache-Control\': \'no-cache, private\', \'Content-Type\': \'application/json\', \'X-Kubernetes-Pf-Flowschema-Uid\': \'59e0f613-106d-4cbb-8f87-f1f605b59802\', \'X-Kubernetes-Pf-Prioritylevel-Uid\': \'65541d7a-7bc8-4395-90f2-ed3dad8cf301\', \'Date\': \'Fri, 17 Sep 2021 14:51:52 GMT\', \'Content-Length\': \'238\'})\nHTTP response body: {"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"persistentvolumes \\"mysql-instance-pv\\" already exists","reason":"AlreadyExists","details":{"name":"mysql-instance-pv","kind":"persistentvolumes"},"code":409}\n\n', 'subrefs': None}}}}, None),)
+</pre>
+
+В mysql-operator.py добавлены:
+
+<pre>
+    apiv1 = kubernetes.client.CoreV1Api()
+    apiv1.delete_persistent_volume(f"{ name }-pv")
+</pre>
+
+### Деплой оператора.
+
+Создаем докер образ и пушим его в хаб
+
+<pre>
+cat Dockerfile
+
+FROM python:3.7
+COPY templates ./templates
+COPY mysql-operator.py ./mysql-operator.py
+RUN pip install kopf kubernetes pyyaml jinja2
+CMD kopf run /mysql-operator.py
+</pre>
+
+<pre>
+docker build -t chudinanton/mysql-operator:v.0.0.1 .
+docker push chudinanton/mysql-operator:v.0.0.1
+</pre>
+
+Создадим и применим манифесты. В Deployment используем свой образ.
+
+<pre>
+
+ka ../deploy/service-account.yml
+ka ../deploy/role.yml
+ka ../deploy/ClusterRoleBinding.yml
+ka ../deploy/deploy-operator.yml
+
+kgpo
+NAME                               READY   STATUS      RESTARTS   AGE
+backup-mysql-instance-job-xh987    0/1     Completed   0          18m
+mysql-instance-6785949c48-nrvg6    1/1     Running     0          17m
+mysql-operator-558ccb8d75-kv2dn    1/1     Running     0          75s
+restore-mysql-instance-job-tsr8h   0/1     Completed   2          17m
+</pre>
+
+И проверяем еще раз.
+
+<pre>
+kubectl get jobs.batch
+NAME                         COMPLETIONS   DURATION   AGE
+backup-mysql-instance-job    1/1           2s         39s
+restore-mysql-instance-job   1/1           18s        18s
+(minikube # N/A) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-operators/build# export MYSQLPOD=$(kubectl get pods -l app=mysql-instance -o jsonpath="{.items[*].metadata.name}")
+(minikube # N/A) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-operators/build# kubectl exec -it $MYSQLPOD -- mysql -potuspassword -e "select * from test;" otus-database
+mysql: [Warning] Using a password on the command line interface can be insecure.
++----+-------------+
+| id | name        |
++----+-------------+
+|  1 | some data   |
+|  2 | some data-2 |
++----+-------------+
+</pre>
+
+К сожалению,  ограничен во времени чтобы выполнить доп. задания.
+
+</details>
+</details>
+
+<details>
 <summary> <b>ДЗ №6 - kubernetes-templating (Шаблонизация манифестов Kubernetes)</b></summary>
 
 - [x] Основное ДЗ
@@ -726,10 +1233,6 @@ tree
 Окружения должны отличаться:
 - Набором labels во всех манифестах
 - Префиксом названий ресурсов
-
-<pre>
-
-</pre>
 
 Проверяем окружения и деплоим:
 
