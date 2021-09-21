@@ -1,7 +1,7 @@
 # chudinanton_platform
 chudinanton Platform repository
 <details>
-<summary> <b>ДЗ №9 - kubernetes-monitoring (Сервисы централизованного логирования для компонентов Kubernetes и приложений)</b></summary>
+<summary> <b>ДЗ №9 - kubernetes-logging (Сервисы централизованного логирования для компонентов Kubernetes и приложений)</b></summary>
 
 - [x] Основное ДЗ
 
