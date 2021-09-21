@@ -1,3 +1,14 @@
 .DS_Store
 __pycache__
 __pycache__/*
+.terraform
+#terraform
+variables.json
+*.tfstate
+*.tfstate.*.backup
+*.tfstate.backup
+*.tfvars
+.terraform/
+terraform/.terraform.tfstate.lock.info
+*.retry
+.terraform.lock.hcl
