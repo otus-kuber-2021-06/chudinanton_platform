@@ -1,0 +1,54 @@
+grafana:
+  ingress:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: nginx
+      kubernetes.io/tls-acme: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-production"
+      cert-manager.io/acme-challenge-type: http01
+      acme.cert-manager.io/http01-edit-in-place: "true"
+    hosts:
+       - grafana.yogatour.su
+    path: /
+    tls:
+     - secretName: grafana.yogatour.su
+       hosts:
+       - grafana.yogatour.su
+
+prometheus:
+  ingress:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: nginx
+      kubernetes.io/tls-acme: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-production"
+      cert-manager.io/acme-challenge-type: http01
+      acme.cert-manager.io/http01-edit-in-place: "true"
+    hosts: 
+       - prometheus.yogatour.su
+    path: /
+    tls:
+     - secretName: prometheus.yogatour.su
+       hosts:
+       - prometheus.yogatour.su
+      # - secretName: prometheus-general-tls
+      #   hosts:
+      #     - prometheus.example.com
+
+  prometheusSpec:
+    tolerations:
+      - key: "node-role"
+        operator: "Equal"
+        value: "infra"
+        effect: "NoSchedule"
+
+#    externalUrl: "prometheus.yogatour.su"
+
+    nodeSelector:
+      cloud.google.com/gke-nodepool: infra-pool
+    serviceMonitorSelectorNilUsesHelmValues: false
+
+  additionalDataSources:
+    - name: Loki
+      type: Loki
+      url: http://loki:3100

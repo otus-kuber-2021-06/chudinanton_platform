@@ -1,0 +1,43 @@
+backend:
+  type: es
+  es:
+    host: elasticsearch-master
+
+extraEntries:
+  filter: |-
+    Keep_Log  off
+
+filter:
+  mergeJSONLog: true
+  mergeLogKey: "app"
+
+audit:
+  enable: true
+  input:
+    memBufLimit: 35MB
+    parser: docker
+    tag: audit.*
+    path: /var/log/audit/kube-apiserver-audit.log
+    bufferChunkSize: 2MB
+    bufferMaxSize: 10MB
+    skipLongLines: On
+    key: kubernetes-audit
+
+input:
+  tail:
+    path: /var/log/containers/*.log
+    ignore_older: 1h
+    exclude_path: /var/log/containers/kibana*.log,/var/log/containers/kube*.log,/var/log/containers/etcd-*.log,/var/log/containers/dashboard-metrics*.log
+
+rawConfig: |
+  @INCLUDE fluent-bit-service.conf
+  @INCLUDE fluent-bit-input.conf
+  @INCLUDE fluent-bit-filter.conf
+  @INCLUDE fluent-bit-output.conf
+
+tolerations:
+  - key: node-role.kubernetes.io/master
+    operator: Equal
+    value: 
+    effect: NoSchedule
+

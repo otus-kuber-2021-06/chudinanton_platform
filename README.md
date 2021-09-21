@@ -1,6 +1,943 @@
 # chudinanton_platform
 chudinanton Platform repository
 <details>
+<summary> <b>ДЗ №9 - kubernetes-monitoring (Сервисы централизованного логирования для компонентов Kubernetes и приложений)</b></summary>
+
+- [x] Основное ДЗ
+
+- [x] Все дополнительные задания *
+
+- [x] Все необязательные и самостоятельные задания
+
+<details>
+<summary> <b>Создаем кластер k8s в gcp через Terraform</b></summary>
+
+Создаем кластер gcp через Terraform. Потребуется ранее установленный gke и непосредственно сам Terraform
+
+https://www.terraform.io/downloads.html
+
+
+> Авторизация будет проходить через сервис аккаунт, созданный ранее в задании kubernetes-templating/Подключаем GCP KMS | Необязательное задание
+
+
+Не забываем выдать сервис аккаунту нужные права в 
+
+https://console.cloud.google.com/iam-admin/serviceaccounts
+
+```console
+gcloud --version                                                       
+Google Cloud SDK 357.0.0
+bq 2.0.71
+core 2021.09.10
+gsutil 4.67
+
+terraform version                                                      
+Terraform v1.0.7
+on darwin_amd64
+```
+
+Актуальная дока:
+
+https://registry.terraform.io/providers/hashicorp/google/latest/docs/guides/getting_started
+
+Дока по гугловым модулям:
+
+https://registry.terraform.io/modules/terraform-google-modules/kubernetes-engine/google/latest
+
+https://registry.terraform.io/modules/terraform-google-modules/kubernetes-engine/google/14.2.0/submodules/auth
+
+И крутой МАН:
+
+https://learnk8s.io/terraform-gke
+
+Создаем папку kubernetes-logging/terraform и инициализируем внутри нее проект
+
+Создаем три файла:
+
+```console
+main.tf - основной код
+output.tf - что хотим вывести
+variables.tf - переменные
+```
+
+Копируем и кастомизируем код и переменные. Чуть подправил провайдера т.к. был ворнинг:
+```console
+Warning: Version constraints inside provider configuration blocks are deprecated
+```
+
+```yml
+provider "google" {
+  project = var.project_id
+}
+```
+
+Ошибку существования default_pool решаем так:
+
+```yml
+  remove_default_node_pool = true
+```
+
+Отключение мониторинга и логгирования так:
+
+```yml
+  monitoring_service       = var.monitoring_service 
+  logging_service          = var.logging_service
+```
+
+Кастомизируем:
+```yml
+project_id
+cluster_name
+region
+```
+
+Инициализируем:
+
+```console
+terraform init
+Initializing modules...
+Downloading terraform-google-modules/network/google 2.6.0 for gcp-network...
+- gcp-network in .terraform/modules/gcp-network
+- gcp-network.routes in .terraform/modules/gcp-network/modules/routes
+- gcp-network.subnets in .terraform/modules/gcp-network/modules/subnets
+- gcp-network.vpc in .terraform/modules/gcp-network/modules/vpc
+Downloading terraform-google-modules/kubernetes-engine/google 16.1.0 for gke...
+- gke in .terraform/modules/gke/modules/private-cluster
+Downloading terraform-google-modules/gcloud/google 2.1.0 for gke.gcloud_delete_default_kube_dns_configmap...
+- gke.gcloud_delete_default_kube_dns_configmap in .terraform/modules/gke.gcloud_delete_default_kube_dns_configmap/modules/kubectl-wrapper
+- gke.gcloud_delete_default_kube_dns_configmap.gcloud_kubectl in .terraform/modules/gke.gcloud_delete_default_kube_dns_configmap
+Downloading terraform-google-modules/kubernetes-engine/google 16.1.0 for gke_auth...
+- gke_auth in .terraform/modules/gke_auth/modules/auth
+
+Initializing the backend...
+
+Initializing provider plugins...
+- Finding latest version of hashicorp/random...
+- Finding latest version of hashicorp/null...
+- Finding latest version of hashicorp/external...
+- Finding latest version of hashicorp/template...
+- Finding latest version of hashicorp/local...
+- Finding hashicorp/google versions matching ">= 2.12.0, >= 3.39.0, < 4.0.0"...
+- Finding hashicorp/kubernetes versions matching "~> 2.0"...
+- Installing hashicorp/external v2.1.0...
+- Installed hashicorp/external v2.1.0 (signed by HashiCorp)
+- Installing hashicorp/template v2.2.0...
+- Installed hashicorp/template v2.2.0 (signed by HashiCorp)
+- Installing hashicorp/local v2.1.0...
+- Installed hashicorp/local v2.1.0 (signed by HashiCorp)
+- Installing hashicorp/google v3.84.0...
+- Installed hashicorp/google v3.84.0 (signed by HashiCorp)
+- Installing hashicorp/kubernetes v2.5.0...
+- Installed hashicorp/kubernetes v2.5.0 (signed by HashiCorp)
+- Installing hashicorp/random v3.1.0...
+- Installed hashicorp/random v3.1.0 (signed by HashiCorp)
+- Installing hashicorp/null v3.1.0...
+- Installed hashicorp/null v3.1.0 (signed by HashiCorp)
+
+Terraform has created a lock file .terraform.lock.hcl to record the provider
+selections it made above. Include this file in your version control repository
+so that Terraform can guarantee to make the same selections by default when
+you run "terraform init" in the future.
+
+Terraform has been successfully initialized!
+
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
+```
+
+Проверяем:
+
+```console
+terraform validate
+Success! The configuration is valid.
+terraform plan
+...
+```
+
+Поэкспериментировал с terraform.tfvars. # TODO: Надо будет обернуть потом в модули все это.
+
+Ну и раскатываем:
+
+```console
+terraform apply -auto-approve=true
+```
+
+Объединяем конфиги:
+
+```console
+cp ~/.kube/config ~/.kube/config.bak && KUBECONFIG=~/.kube/config:~/.kube/conf.d/config-gcp-cluster-prod kubectl config view --flatten > /tmp/config && mv /tmp/config ~/.kube/config
+```
+
+Проверяем:
+
+```console
+k config use-context gcp-cluster-prod
+kg nodes -o wide
+NAME                                              STATUS   ROLES    AGE   VERSION            INTERNAL-IP   EXTERNAL-IP     OS-IMAGE                             KERNEL-VERSION   CONTAINER-RUNTIME
+gke-gcp-cluster-prod-default-pool-fa81dbe2-1l3m   Ready    <none>   49m   v1.20.10-gke.301   10.10.0.3     34.141.59.249   Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+gke-gcp-cluster-prod-default-pool-fa81dbe2-whrh   Ready    <none>   49m   v1.20.10-gke.301   10.10.0.2     34.89.236.114   Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+```
+
+Кластер развернут. Но по условию нам нужен второй пул infra-pool с тремя нодами и tain node-role=infra:NoSchedule
+
+Добавляем в main.tf:
+
+```yml
+      name                      = var.node_pools_2
+      machine_type              = var.machine_type_node_pools_2
+      node_locations            = var.node_pools_2_node_locations
+      min_count                 = var.node_pools_2_min_count_nodes
+      max_count                 = var.node_pools_2_max_count_nodes
+      disk_size_gb              = var.node_pools_2_disk_size_gb
+   },
+  ]
+  node_pools_taints = {
+    infra-pool = [
+      {
+        key    = "node-role"
+        value  = "infra"
+        effect = "NO_SCHEDULE"
+      }
+    ]
+  }
+```
+
+Проверям и раскатываем
+
+```console
+terraform validate
+terraform plan
+terraform apply -auto-approve=true
+</pre>
+
+Смотрим что получилось:
+
+```console
+kg nodes -o wide
+NAME                                              STATUS   ROLES    AGE     VERSION            INTERNAL-IP   EXTERNAL-IP      OS-IMAGE                             KERNEL-VERSION   CONTAINER-RUNTIME
+gke-gcp-cluster-prod-default-pool-46899ffe-jncm   Ready    <none>   4m58s   v1.20.10-gke.301   10.10.0.3     34.141.64.71     Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+gke-gcp-cluster-prod-default-pool-46899ffe-m0b9   Ready    <none>   5m      v1.20.10-gke.301   10.10.0.2     34.89.236.114    Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+gke-gcp-cluster-prod-infra-pool-607b4813-flcf     Ready    <none>   3m33s   v1.20.10-gke.301   10.10.0.4     34.107.86.246    Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+gke-gcp-cluster-prod-infra-pool-607b4813-nc9v     Ready    <none>   3m35s   v1.20.10-gke.301   10.10.0.5     34.107.120.254   Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+gke-gcp-cluster-prod-infra-pool-607b4813-rt6f     Ready    <none>   3m35s   v1.20.10-gke.301   10.10.0.6     35.242.222.132   Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+
+kd nodes gke-gcp-cluster-prod-infra-pool-607b4813-rt6f | grep Taint
+Taints:             node-role=infra:NoSchedule
+```
+
+Обращаем внимание, что Cloud Logging и Cloud Monitoring отключены.
+
+### Установка nginx-ingress и cert-manager из helmfile
+
+Я сразу вкачу nginx-ingress и cert-manager из helmfile.yaml
+
+```console
+helmfile sync
+
+kg all -n cert-manager -o wide
+NAME                                           READY   STATUS    RESTARTS   AGE     IP           NODE                                              NOMINATED NODE   READINESS GATES
+pod/cert-manager-66b6d6bf59-f4xr7              1/1     Running   0          6m40s   10.20.5.83   gke-gcp-cluster-prod-default-pool-46899ffe-qpw7   <none>           <none>
+pod/cert-manager-cainjector-856d4df858-6b9s7   1/1     Running   0          6m40s   10.20.5.82   gke-gcp-cluster-prod-default-pool-46899ffe-qpw7   <none>           <none>
+pod/cert-manager-webhook-6d866ffbc7-sfgks      1/1     Running   0          6m40s   10.20.5.81   gke-gcp-cluster-prod-default-pool-46899ffe-qpw7   <none>           <none>
+
+NAME                           TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE     SELECTOR
+service/cert-manager           ClusterIP   10.30.129.212   <none>        9402/TCP   6m41s   app.kubernetes.io/component=controller,app.kubernetes.io/instance=cert-manager,app.kubernetes.io/name=cert-manager
+service/cert-manager-webhook   ClusterIP   10.30.26.202    <none>        443/TCP    6m41s   app.kubernetes.io/component=webhook,app.kubernetes.io/instance=cert-manager,app.kubernetes.io/name=webhook
+
+NAME                                      READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS     IMAGES                                            SELECTOR
+deployment.apps/cert-manager              1/1     1            1           6m41s   cert-manager   quay.io/jetstack/cert-manager-controller:v1.5.3   app.kubernetes.io/component=controller,app.kubernetes.io/instance=cert-manager,app.kubernetes.io/name=cert-manager
+deployment.apps/cert-manager-cainjector   1/1     1            1           6m41s   cert-manager   quay.io/jetstack/cert-manager-cainjector:v1.5.3   app.kubernetes.io/component=cainjector,app.kubernetes.io/instance=cert-manager,app.kubernetes.io/name=cainjector
+deployment.apps/cert-manager-webhook      1/1     1            1           6m41s   cert-manager   quay.io/jetstack/cert-manager-webhook:v1.5.3      app.kubernetes.io/component=webhook,app.kubernetes.io/instance=cert-manager,app.kubernetes.io/name=webhook
+
+NAME                                                 DESIRED   CURRENT   READY   AGE     CONTAINERS     IMAGES                                            SELECTOR
+replicaset.apps/cert-manager-66b6d6bf59              1         1         1       6m41s   cert-manager   quay.io/jetstack/cert-manager-controller:v1.5.3   app.kubernetes.io/component=controller,app.kubernetes.io/instance=cert-manager,app.kubernetes.io/name=cert-manager,pod-template-hash=66b6d6bf59
+replicaset.apps/cert-manager-cainjector-856d4df858   1         1         1       6m41s   cert-manager   quay.io/jetstack/cert-manager-cainjector:v1.5.3   app.kubernetes.io/component=cainjector,app.kubernetes.io/instance=cert-manager,app.kubernetes.io/name=cainjector,pod-template-hash=856d4df858
+replicaset.apps/cert-manager-webhook-6d866ffbc7      1         1         1       6m41s   cert-manager   quay.io/jetstack/cert-manager-webhook:v1.5.3      app.kubernetes.io/component=webhook,app.kubernetes.io/instance=cert-manager,app.kubernetes.io/name=webhook,pod-template-hash=6d866ffbc7
+
+kg all -n ingress-nginx -o wide
+NAME                                            READY   STATUS    RESTARTS   AGE     IP           NODE                                            NOMINATED NODE   READINESS GATES
+pod/ingress-nginx-controller-586f7795dd-bjtrw   1/1     Running   0          8m55s   10.20.4.19   gke-gcp-cluster-prod-infra-pool-607b4813-rt6f   <none>           <none>
+pod/ingress-nginx-controller-586f7795dd-l268v   1/1     Running   0          8m55s   10.20.3.22   gke-gcp-cluster-prod-infra-pool-607b4813-flcf   <none>           <none>
+pod/ingress-nginx-controller-586f7795dd-sqqql   1/1     Running   0          8m55s   10.20.2.21   gke-gcp-cluster-prod-infra-pool-607b4813-nc9v   <none>           <none>
+
+NAME                                         TYPE           CLUSTER-IP      EXTERNAL-IP      PORT(S)                      AGE     SELECTOR
+service/ingress-nginx-controller             LoadBalancer   10.30.118.142   34.141.115.199   80:32018/TCP,443:32593/TCP   8m56s   app.kubernetes.io/component=controller,app.kubernetes.io/instance=ingress-nginx,app.kubernetes.io/name=ingress-nginx
+service/ingress-nginx-controller-admission   ClusterIP      10.30.149.52    <none>           443/TCP                      8m57s   app.kubernetes.io/component=controller,app.kubernetes.io/instance=ingress-nginx,app.kubernetes.io/name=ingress-nginx
+service/ingress-nginx-controller-metrics     ClusterIP      10.30.198.189   <none>           10254/TCP                    8m57s   app.kubernetes.io/component=controller,app.kubernetes.io/instance=ingress-nginx,app.kubernetes.io/name=ingress-nginx
+
+NAME                                       READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES                                                                                                               SELECTOR
+deployment.apps/ingress-nginx-controller   3/3     3            3           8m57s   controller   k8s.gcr.io/ingress-nginx/controller:v1.0.0@sha256:0851b34f69f69352bf168e6ccf30e1e20714a264ab1ecd1933e4d8c0fc3215c6   app.kubernetes.io/component=controller,app.kubernetes.io/instance=ingress-nginx,app.kubernetes.io/name=ingress-nginx
+
+NAME                                                  DESIRED   CURRENT   READY   AGE     CONTAINERS   IMAGES                                                                                                               SELECTOR
+replicaset.apps/ingress-nginx-controller-586f7795dd   3         3         3       8m57s   controller   k8s.gcr.io/ingress-nginx/controller:v1.0.0@sha256:0851b34f69f69352bf168e6ccf30e1e20714a264ab1ecd1933e4d8c0fc3215c6   app.kubernetes.io/component=controller,app.kubernetes.io/instance=ingress-nginx,app.kubernetes.io/name=ingress-nginx,pod-template-hash=586f7795dd
+
+```
+
+Обращаем внимание, что поды стартовали на infra-pool нодах.
+
+### Установка HipsterShop
+
+Для начала, установим в Kubernetes кластер уже знакомый нам HipsterShop.
+
+```console
+kubectl create ns microservices-demo
+kubectl apply -f https://raw.githubusercontent.com/express42/otus-platform-snippets/master/Module-02/Logging/microservices-demo-without-resources.yaml -n microservices-demo
+```
+
+Проверяем, что все раскатилось на default-pool нодах:
+
+```console
+kubectl get pods -n microservices-demo -o wide                                          ✹ ✭kubernetes-monitoring 
+NAME                                     READY   STATUS    RESTARTS   AGE     IP           NODE                                              NOMINATED NODE   READINESS GATES
+adservice-56d56d89cc-wfg5d               1/1     Running   0          23h   10.20.1.14   gke-gcp-cluster-prod-default-pool-46899ffe-jncm   <none>           <none>
+cartservice-c8b9fc586-fx7w7              1/1     Running   1          23h   10.20.0.16   gke-gcp-cluster-prod-default-pool-46899ffe-m0b9   <none>           <none>
+checkoutservice-74f4c5464f-9xl96         1/1     Running   0          23h   10.20.1.9    gke-gcp-cluster-prod-default-pool-46899ffe-jncm   <none>           <none>
+currencyservice-7df4d74b7c-wzmfh         1/1     Running   0          23h   10.20.0.17   gke-gcp-cluster-prod-default-pool-46899ffe-m0b9   <none>           <none>
+emailservice-86794489df-nmjc8            1/1     Running   0          23h   10.20.0.13   gke-gcp-cluster-prod-default-pool-46899ffe-m0b9   <none>           <none>
+frontend-cf49f7975-k4bmw                 1/1     Running   0          23h   10.20.1.10   gke-gcp-cluster-prod-default-pool-46899ffe-jncm   <none>           <none>
+loadgenerator-7fdb874b-djzxl             1/1     Running   4          23h   10.20.1.12   gke-gcp-cluster-prod-default-pool-46899ffe-jncm   <none>           <none>
+paymentservice-5768d9bb67-hrvbz          1/1     Running   0          23h   10.20.0.15   gke-gcp-cluster-prod-default-pool-46899ffe-m0b9   <none>           <none>
+productcatalogservice-84fd74ccc9-vrmz4   1/1     Running   0          23h   10.20.1.11   gke-gcp-cluster-prod-default-pool-46899ffe-jncm   <none>           <none>
+recommendationservice-6fcb597467-z4fkx   1/1     Running   0          23h   10.20.0.14   gke-gcp-cluster-prod-default-pool-46899ffe-m0b9   <none>           <none>
+redis-cart-55d76945cb-fwflm              1/1     Running   0          23h   10.20.0.18   gke-gcp-cluster-prod-default-pool-46899ffe-m0b9   <none>           <none>
+shippingservice-6bc75ffff-lsg92          1/1     Running   0          23h   10.20.1.13   gke-gcp-cluster-prod-default-pool-46899ffe-jncm   <none>           <none>
+```
+
+</details>
+
+<details>
+<summary> <b>Установка EFK стека</b></summary>
+
+### Установка EFK стека | Helm charts
+
+Я не буду издеваться над кластером и установлю сразу через tolerations и nodeSelector
+
+```console
+helm repo add elastic https://helm.elastic.co
+kubectl create ns observability
+
+# ElasticSearch
+helm upgrade --install elasticsearch elastic/elasticsearch --namespace observability -f elasticsearch.values.yaml
+# Kibana
+helm upgrade --install kibana elastic/kibana --namespace observability
+# Fluent Bit DEPRECATED
+helm upgrade --install fluent-bit stable/fluent-bit --namespace observability
+
+```
+
+### Установка EFK стека | Kibana
+
+Кибану зарулим через https
+
+```console
+helm upgrade --install kibana elastic/kibana --namespace observability -f kibana.values.yaml
+```
+
+values взяты из чарта.
+
+Проверяем доступность:
+
+https://kibana.yogatour.su/
+
+### Установка EFK стека
+
+Создаем fluent-bit.values.yaml натравливаем его на наш эластик и обновляем.
+
+```console
+helm upgrade --install fluent-bit stable/fluent-bit --namespace observability -f fluent-bit.values.yaml
+```
+
+После установки можно заметить, что в ElasticSearch попадают далеко не все логи нашего приложения. Причину можно найти в логах pod с Fluent Bit, он пытается обработать JSON, отдаваемый приложением, и находит там дублирующиеся поля time и timestamp 
+
+> GitHub [issue](https://github.com/fluent/fluent-bit/issues/628), с более подробным описанием проблемы
+
+
+Решаем проблему удалением двух полей:
+
+```yml
+rawConfig: |
+  @INCLUDE fluent-bit-service.conf
+  @INCLUDE fluent-bit-input.conf
+  @INCLUDE fluent-bit-filter.conf
+  @INCLUDE fluent-bit-output.conf
+
+  [FILTER]
+      Name modify
+      Match *
+      Remove time
+      Remove @timestamp
+```
+
+Применяем:
+
+```console
+helm upgrade --install fluent-bit stable/fluent-bit --namespace observability -f fluent-bit.values.yaml
+```
+
+
+</details>
+
+<details>
+<summary> <b> Установка EFK стека | Задание со ⭐  </b></summary>
+
+Решение есть по ссылке в самом ДЗ:
+
+> https://github.com/fluent/fluent-bit/issues/628#issuecomment-592489560
+
+> https://bk0010-01.blogspot.com/2020/03/fluent-bit-and-kibana-in-kubernetes.html
+
+> https://github.com/Vfialkin/vf-observability/blob/master/fluentbit/fluent-bit-dev.yaml
+
+
+```yml
+extraEntries:
+  filter: |-
+    Keep_Log  off
+
+filter:
+  mergeJSONLog: true
+  mergeLogKey: "app"
+
+input:
+  tail:
+    path: /var/log/containers/*.log
+    ignore_older: 1h
+    exclude_path: /var/log/containers/kibana*.log,/var/log/containers/kube*.log,/var/log/containers/etcd-*.log,/var/log/containers/dashboard-metrics*.log
+```
+
+Исключены логи самой кибаны, дашборда и куба. Мы хотим получать логи нашего приложения, насколько я понял само задание.
+
+После обновления чарта fluent-bit проблем больше нет :) Нет "лишних" логов - нет проблемы :)
+Остались логи приложухи. В этом можно убедиться потыкая UI hipster-shop'а.
+
+
+```console
+kl pod/fluent-bit-wzh8j -n observability
+Fluent Bit v1.3.7
+Copyright (C) Treasure Data
+
+[2021/09/19 21:19:19] [ info] [storage] initializing...
+[2021/09/19 21:19:19] [ info] [storage] in-memory
+[2021/09/19 21:19:19] [ info] [storage] normal synchronization mode, checksum disabled, max_chunks_up=128
+[2021/09/19 21:19:19] [ info] [engine] started (pid=1)
+[2021/09/19 21:19:19] [ info] [filter_kube] https=1 host=kubernetes.default.svc port=443
+[2021/09/19 21:19:19] [ info] [filter_kube] local POD info OK
+[2021/09/19 21:19:19] [ info] [filter_kube] testing connectivity with API server...
+[2021/09/19 21:19:19] [ info] [filter_kube] API server connectivity OK
+[2021/09/19 21:19:19] [ info] [sp] stream processor started
+```
+</details>
+
+<details>
+<summary> <b>Мониторинг ElasticSearch</b></summary>
+
+Добавил игрессы + ssl для prometheus и grafana. prometheus разворачивается с tolerations и nodeSelector.
+
+<b>Prometheus разворачиваем из нового чарта kube-prometheus-stack! prometheus-community/prometheus-operator устарел и DEPRECATED!</b>
+
+```console
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm upgrade --install prometheus prometheus-community/kube-prometheus-stack -n observability -f kube-prometheus-stack/values.yaml
+
+```
+
+Если не поставить это, то prometheus будет искать сервис мониторы только "selectors based on values in the helm deployment"
+
+```yaml
+serviceMonitorSelectorNilUsesHelmValues: false
+```
+
+Проверяем доступность:
+
+```
+https://grafana.yogatour.su/
+https://prometheus.yogatour.su/
+
+```
+
+<b>Установим prometheus exporter из prometheus-community. stable/elasticsearch-exporter DEPRECATED!</b>
+
+```console
+helm upgrade --install elasticsearch-exporter prometheus-community/prometheus-elasticsearch-exporter --set es.uri=http://elasticsearch-master:9200 --set serviceMonitor.enabled=true --namespace=observability
+```
+
+Актуальный дашборд для графаны:
+
+> https://github.com/prometheus-community/elasticsearch_exporter/blob/master/examples/grafana/dashboard.json
+
+> https://grafana.com/grafana/dashboards/4358
+
+Рассмотрим некоторое количество ключевых метрик, которые рекомендуется отслеживать при эксплуатации ElasticSearch:
+
+- unassigned_shards - количество shard, для которых не нашлось подходящей ноды, их наличие сигнализирует о проблемах
+- jvm_memory_usage - высокая загрузка (в процентах от выделенной памяти) может привести к замедлению работы кластера
+- number_of_pending_tasks - количество задач, ожидающих выполнения. Значение метрики, отличное от нуля, может сигнализировать о наличии проблем внутри кластера
+
+> Больше метрик с их описанием можно найти [здесь](https://habr.com/ru/company/yamoney/blog/358550/)
+
+</details>
+
+<details>
+<summary> <b>EFK | nginx ingress</b></summary>
+
+Чтобы логи nginx попали в эластик, надо запустить fluent-bit на infra-pool
+
+```yaml
+tolerations:
+  - key: node-role
+    operator: Equal
+    value: infra
+    effect: NoSchedule
+```
+
+Перезапуск:
+
+```console
+helm upgrade --install fluent-bit stable/fluent-bit --namespace observability -f fluent-bit.values.yaml
+```
+
+Логи пошли. Но нужно их распарсить.
+
+
+Устанавливаем формат логов и описываем их формат.
+
+Дока для оф. чарта от Nginx Inc (я пробовал разворачивать два разных ingress):
+
+https://github.com/nginxinc/kubernetes-ingress/tree/v1.12.1/examples/custom-log-format
+
+https://docs.nginx.com/nginx-ingress-controller/configuration/global-configuration/configmap-resource#logging
+
+
+
+```yaml
+  config:
+    ## The name of the ConfigMap used by the Ingress controller.
+    ## Autogenerated if not set or set to "".
+     name: nginx-config
+
+    ## The annotations of the Ingress Controller configmap.
+     annotations: {}
+
+    ## The entries of the ConfigMap for customizing NGINX configuration.
+     entries:
+      log-format: >-
+        { "remote_addr": "$proxy_protocol_addr", "x-forward-for":
+        "$proxy_add_x_forwarded_for", "remote_user": "$remote_user", "bytes_sent":
+        $bytes_sent, "request_time": $request_time, "status":$status, "vhost":  
+        "$host", "request_proto": "$server_protocol", "path": "$uri",
+        "request_query": "$args", "request_length": $request_length, "duration":
+        $request_time,"method": "$request_method", "http_referrer": "$http_referer",
+        "http_user_agent": "$http_user_agent" }
+      log-format-escaping: json
+```
+
+Дока по ingress-nginx от куба
+
+https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/#log-format-upstream
+
+Для ingress-nginx от куба правильно будет так:
+
+```yaml
+  config:
+    name: nginx-config
+
+    log-format-escape-json: "true"
+    log-format-upstream: '{"remote_addr": "$proxy_protocol_addr", "x-forward-for": "$proxy_add_x_forwarded_for", "request_id": "$req_id", "remote_user": "$remote_user", "bytes_sent": $bytes_sent, "request_time": $request_time, "status":$status, "vhost": "$host", "request_proto": "$server_protocol", "path": "$uri", "request_query": "$args", "request_length": $request_length, "duration": $request_time,"method": "$request_method", "http_referrer": "$http_referer", "http_user_agent": "$http_user_agent" }'
+```
+
+Проверяем в kibana, что логи теперь идут в json формате и разбиваются по полям:
+
+```log
+  "_source": {
+    "@timestamp": "2021-09-20T09:49:47.708Z",
+    "stream": "stdout",
+    "time": "2021-09-20T09:49:47.708788242Z",
+    "app": {
+      "remote_addr": "",
+      "x-forward-for": "87.228.103.130",
+      "remote_user": "",
+      "bytes_sent": 710,
+      "request_time": 0,
+      "status": 404,
+      "vhost": "34.141.59.249",
+      "request_proto": "HTTP/1.1",
+      "path": "/",
+      "request_query": "",
+      "request_length": 492,
+      "duration": 0,
+      "method": "GET",
+      "http_referrer": "",
+      "http_user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.82 Safari/537.36"
+    },
+```
+
+Поигрался с дашбордом и Visualizes
+Выгрузил export.ndjson.
+
+</details>
+
+<details>
+<summary> <b>Loki</b></summary>
+
+- Установим Loki из актуально helm чарта grafana/loki-stack!
+- Модифицируем prometheus чтобы datasource Loki создавался вместе с prometheus
+- Отправляем логи в prometheus из ingress-nginx
+
+Актуальный ман по установке Loki:
+
+https://grafana.com/docs/loki/latest/installation/helm/
+
+```console
+helm repo add grafana https://grafana.github.io/helm-charts
+
+helm upgrade --install loki grafana/loki-stack -n observability -f loki.values.yaml
+
+```
+
+Не забываем про tolerations node-role
+
+Добавляем в kube-prometheus-stack/values.yaml Loki datasource.
+
+```yml
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki:3100/
+      access: proxy
+```
+
+И обновляем наш prometheus-stack:
+
+```console
+helm upgrade --install prometheus prometheus-community/kube-prometheus-stack -n observability -f kube-prometheus-stack/values.yaml
+```
+
+Смотрим в Grafana появился ли Loki datasource.
+
+Добавляем в nginx-ingress.values.yaml включение метрик для prometheus
+
+Дока:
+
+https://github.com/nginxinc/kubernetes-ingress/tree/master/deployments/helm-chart#configuration
+
+```yml
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      namespace: observability
+
+```
+
+Применяем:
+
+```console
+helmfile sync
+```
+
+nginx-ingress начинает отдавать метрики в Prometheus format на 9113 порту.
+
+Все, после этого prometheus начинает видеть наши ингрессы.
+
+### Loki | Визуализация
+
+- Добавляем вывод логов в Графана.
+- Делаем необходимый дашборд и выгружаем его в nginx-ingress.json
+
+
+### Event logging | k8s-event-logger
+
+https://github.com/max-rocket-internet/k8s-event-logger
+
+Позволяет получить и сохранить event'ы Kubernetes 
+
+</details>
+
+<details>
+<summary> <b>Audit logging/Host logging | 2 Задания со ⭐</b></summary>
+
+Документация.
+
+Дано, self-hosted кластер на kind
+
+```yml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+- role: control-plane
+- role: control-plane
+- role: worker
+- role: worker
+- role: worker
+networking:
+  kubeProxyMode: "ipvs"
+```
+
+```console
+kind create cluster --config
+kg nodes -o wide
+NAME                  STATUS   ROLES                  AGE     VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE       KERNEL-VERSION     CONTAINER-RUNTIME
+kind-control-plane    Ready    control-plane,master   5m17s   v1.21.1   172.18.0.5    <none>        Ubuntu 21.04   5.10.47-linuxkit   containerd://1.5.2
+kind-control-plane2   Ready    control-plane,master   4m31s   v1.21.1   172.18.0.7    <none>        Ubuntu 21.04   5.10.47-linuxkit   containerd://1.5.2
+kind-control-plane3   Ready    control-plane,master   3m35s   v1.21.1   172.18.0.8    <none>        Ubuntu 21.04   5.10.47-linuxkit   containerd://1.5.2
+kind-worker           Ready    <none>                 3m13s   v1.21.1   172.18.0.3    <none>        Ubuntu 21.04   5.10.47-linuxkit   containerd://1.5.2
+kind-worker2          Ready    <none>                 3m13s   v1.21.1   172.18.0.6    <none>        Ubuntu 21.04   5.10.47-linuxkit   containerd://1.5.2
+kind-worker3          Ready    <none>                 3m12s   v1.21.1   172.18.0.4    <none>        Ubuntu 21.04   5.10.47-linuxkit   containerd://1.5.2
+```  
+
+Задача: настроить сбор аудит логов и их отправку в elastic.
+
+Все артифакты сохраним в audit-logging папке.
+
+Разворачиваем EFK стек:
+
+```console
+kubectl create ns observability
+helm upgrade --install elasticsearch elastic/elasticsearch --namespace observability
+helm upgrade --install kibana elastic/kibana --namespace observability
+```
+
+В старом helm чарте есть такое:
+
+```yml
+
+audit:
+  enable: false
+  input:
+    memBufLimit: 35MB
+    parser: docker
+    tag: audit.*
+    path: /var/log/kube-apiserver-audit.log
+    bufferChunkSize: 2MB
+    bufferMaxSize: 10MB
+    skipLongLines: On
+    key: kubernetes-audit
+
+</details>
+```
+
+Используем эту секцию. В новом чарте иначе, нужно это учитывать.
+
+Минимальная политика с выводом всего из документации:
+
+"Вы можете использовать минимальный файл политики аудита для регистрации всех запросов на Metadata уровне:
+
+```yml
+# Log all requests at the Metadata level.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+- level: Metadata
+```
+
+Теперь нужно передать на все ноды. Придется это сделать с хостовой машины тк у нас kind. Я опубликую все в рабочей папке для наглядности.
+
+```
+    - --audit-policy-file=/etc/kubernetes/audit-policies/audit-policy.yaml
+    - --audit-log-path=/var/log/audit/kube-apiserver-audit.log
+    - --audit-log-format=json
+```
+
+Я сделаю только на одной ноде для примера. Гемор.
+
+```
+vim /etc/kubernetes/manifests/kube-apiserver.yaml
+
+```
+    volumeMounts:
+    - mountPath: /etc/kubernetes/
+      name: audit-logging-policies
+      readOnly: true
+    - mountPath: /var/log/audit
+      name: audit-logs
+      readOnly: false
+
+  volumes:
+  - hostPath:
+      path: /etc/kubernetes/audit-policies
+      type: DirectoryOrCreate
+    name: audit-logging-policies
+  - hostPath:
+      path: /var/log/audit
+      type: DirectoryOrCreate
+    name: audit-logs
+```
+
+Не забываем про для fluent-bit
+
+```yml
+tolerations:
+  - key: node-role.kubernetes.io/master
+    operator: Equal
+    value: 
+    effect: NoSchedule
+```
+
+helm upgrade --install fluent-bit stable/fluent-bit --namespace observability -f fluent-bit.values.yaml
+
+Поперло, смотрим в кибане:
+
+```json
+{
+  "_index": "kubernetes_cluster-2021.09.21",
+  "_type": "flb_type",
+  "_id": "nJHvB3wBUDsBltizgDTy",
+  "_score": 1,
+  "_source": {
+    "@timestamp": "2021-09-21T10:38:28.886Z",
+    "kind": "Event",
+    "apiVersion": "audit.k8s.io/v1",
+    "level": "Metadata",
+    "auditID": "b1412414-6161-48ca-b16c-f882f115233a",
+    "stage": "ResponseComplete",
+    "requestURI": "/readyz",
+    "verb": "get",
+    "user": {
+      "username": "system:anonymous",
+      "groups": [
+        "system:unauthenticated"
+      ]
+    },
+    "sourceIPs": [
+      "172.18.0.5"
+    ],
+    "userAgent": "kube-probe/1.21",
+    "responseStatus": {
+      "metadata": {},
+      "code": 200
+    },
+    "requestReceivedTimestamp": "2021-09-21T10:38:28.817094Z",
+    "stageTimestamp": "2021-09-21T10:38:28.837455Z",
+    "annotations": {
+      "authorization_k8s_io/decision": "allow",
+      "authorization_k8s_io/reason": "RBAC: allowed by ClusterRoleBinding \"system:public-info-viewer\" of ClusterRole \"system:public-info-viewer\" to Group \"system:unauthenticated\""
+    }
+  },
+  "fields": {
+    "sourceIPs.keyword": [
+      "172.18.0.5"
+    ],
+    "stage.keyword": [
+      "ResponseComplete"
+    ],
+    "user.username.keyword": [
+      "system:anonymous"
+    ],
+    "auditID.keyword": [
+      "b1412414-6161-48ca-b16c-f882f115233a"
+    ],
+    "userAgent.keyword": [
+      "kube-probe/1.21"
+    ],
+    "user.username": [
+      "system:anonymous"
+    ],
+    "kind.keyword": [
+      "Event"
+    ],
+    "annotations.authorization_k8s_io/decision": [
+      "allow"
+    ],
+    "apiVersion": [
+      "audit.k8s.io/v1"
+    ],
+    "apiVersion.keyword": [
+      "audit.k8s.io/v1"
+    ],
+    "requestReceivedTimestamp": [
+      "2021-09-21T10:38:28.817Z"
+    ],
+    "auditID": [
+      "b1412414-6161-48ca-b16c-f882f115233a"
+    ],
+    "level": [
+      "Metadata"
+    ],
+    "annotations.authorization_k8s_io/reason": [
+      "RBAC: allowed by ClusterRoleBinding \"system:public-info-viewer\" of ClusterRole \"system:public-info-viewer\" to Group \"system:unauthenticated\""
+    ],
+    "kind": [
+      "Event"
+    ],
+    "verb": [
+      "get"
+    ],
+    "annotations.authorization_k8s_io/reason.keyword": [
+      "RBAC: allowed by ClusterRoleBinding \"system:public-info-viewer\" of ClusterRole \"system:public-info-viewer\" to Group \"system:unauthenticated\""
+    ],
+    "responseStatus.code": [
+      200
+    ],
+    "userAgent": [
+      "kube-probe/1.21"
+    ],
+    "requestURI": [
+      "/readyz"
+    ],
+    "user.groups.keyword": [
+      "system:unauthenticated"
+    ],
+    "stageTimestamp": [
+      "2021-09-21T10:38:28.837Z"
+    ],
+    "user.groups": [
+      "system:unauthenticated"
+    ],
+    "sourceIPs": [
+      "172.18.0.5"
+    ],
+    "@timestamp": [
+      "2021-09-21T10:38:28.886Z"
+    ],
+    "stage": [
+      "ResponseComplete"
+    ],
+    "verb.keyword": [
+      "get"
+    ],
+    "level.keyword": [
+      "Metadata"
+    ],
+    "annotations.authorization_k8s_io/decision.keyword": [
+      "allow"
+    ],
+    "requestURI.keyword": [
+      "/readyz"
+    ]
+  }
+}
+```
+</details>
+
+
+
+<details>
+<summary> <b>Установка nginx-ingress | Самостоятельное задание</b></summary>
+
+C helmfile я потопропился :) Модифицируем его:
+
+```yml
+    values:
+      - ./nginx-ingress.values.yaml
+```
+
+values взял из stable helm chart
+
+Проверяем доступность:
+
+https://kibana.yogatour.su/
+
+</details>
+
+</details>
+
+<details>
 <summary> <b>ДЗ №8 - kubernetes-monitoring (Мониторинг сервиса в кластере k8s)</b></summary>
 
 - [x] Основное ДЗ
@@ -1080,8 +2017,7 @@ kg secrets secret -n hipster-shop -o "jsonpath={.data.visibleKey}" | base64 -D
 </pre>
 </details>
 <details>
-<summary> <b>Подключаем GCP KMS | Необязательное
-задание</b></summary>
+<summary> <b>Подключаем GCP KMS | Необязательное задание</b></summary>
 
 
 <pre>
