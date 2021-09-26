@@ -1,6 +1,1376 @@
 # chudinanton_platform
 chudinanton Platform repository
 <details>
+<summary> <b>ДЗ №10 - kubernetes-vault (Хранилище секретов для приложений. Vault )</b></summary>
+
+- [x] Основное ДЗ
+
+- [x] Все дополнительные задания *
+
+- [x] Все необязательные и самостоятельные задания
+
+<details>
+<summary> <b>Инсталляция hashicorp vault HA в k8s</b></summary>
+
+В ходе работы мы:
+- установим кластер vault в kubernetes
+- научимся создавать секреты и политики
+- настроим авторизацию в vault через kubernetes sa
+- сделаем под с контейнером nginx, в который прокинем секреты из vault через consul-template
+
+```console
+terraform apply -auto-approve=true
+```
+Объединяем конфиги:
+
+```console
+cp ~/.kube/config ~/.kube/config.bak && export KUBECONFIG=~/.kube/config:~/.kube/conf.d/config-gcp-cluster-prod-2
+kubectl config view --flatten > /tmp/config-3 && mv /tmp/config-3 ~/.kube/config
+kg nodes -o wide
+NAME                                                STATUS   ROLES    AGE   VERSION             INTERNAL-IP   EXTERNAL-IP     OS-IMAGE                             KERNEL-VERSION   CONTAINER-RUNTIME
+gke-gcp-cluster-prod-2-default-pool-2eb241ba-1wxv   Ready    <none>   13m   v1.20.10-gke.1600   10.10.0.3     34.141.35.157   Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+gke-gcp-cluster-prod-2-default-pool-2eb241ba-8bjn   Ready    <none>   13m   v1.20.10-gke.1600   10.10.0.4     34.107.58.10    Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+gke-gcp-cluster-prod-2-default-pool-2eb241ba-bdb2   Ready    <none>   13m   v1.20.10-gke.1600   10.10.0.2     34.141.64.71    Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+```
+
+Клонируем репозиторий consul (необходимо минимум 3 ноды)
+
+```console
+git clone https://github.com/hashicorp/consul-helm.git
+helm install --name=consul consul-helm
+```
+
+Клонируем репозиторий vault.
+
+```console
+git clone https://github.com/hashicorp/vault-helm.git
+
+```
+
+Я сделаю отдельный vault-values.yaml для Vault
+
+```console
+helm upgrade --install vault ./vault-helm -f vault-values.yaml
+helm status vault
+NAME: vault
+LAST DEPLOYED: Fri Sep 24 12:12:53 2021
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+NOTES:
+Thank you for installing HashiCorp Vault!
+
+Now that you have deployed Vault, you should look over the docs on using
+Vault with Kubernetes available here:
+
+https://www.vaultproject.io/docs/
+
+
+Your release is named vault. To learn more about the release, try:
+
+  $ helm status vault
+  $ helm get manifest vault
+
+kubectl logs vault-0
+...
+2021-09-24T09:37:54.357Z [INFO]  core: security barrier not initialized
+2021-09-24T09:37:54.358Z [INFO]  core: seal configuration missing, not initialized
+...
+```
+
+Проведем инициализацию через любой под vault'а
+
+```console
+kubectl exec -it vault-0 -- vault operator init --key-shares=1 --key-threshold=1
+
+Unseal Key 1: sHXATMp0xRzIkzSM3Teq3Io8l6kzhAw+TUW8FoLFw9g=
+
+Initial Root Token: s.CySODY31NAYBmbbex14D7cgn
+
+```
+
+Проверим состояние vault'а
+
+```console
+kubectl logs vault-0
+...
+2021-09-24T11:38:57.606Z [INFO]  core: security barrier initialized: stored=1 shares=1 threshold=1
+2021-09-24T11:38:57.765Z [INFO]  core: post-unseal setup starting
+2021-09-24T11:38:57.799Z [INFO]  core: loaded wrapping token key
+2021-09-24T11:38:57.799Z [INFO]  core: successfully setup plugin catalog: plugin-directory=""
+2021-09-24T11:38:57.802Z [INFO]  core: no mounts; adding default mount table
+2021-09-24T11:38:57.817Z [INFO]  core: successfully mounted backend: type=cubbyhole path=cubbyhole/
+2021-09-24T11:38:57.817Z [INFO]  core: successfully mounted backend: type=system path=sys/
+2021-09-24T11:38:57.818Z [INFO]  core: successfully mounted backend: type=identity path=identity/
+2021-09-24T11:38:57.917Z [INFO]  core: successfully enabled credential backend: type=token path=token/
+2021-09-24T11:38:57.921Z [INFO]  rollback: starting rollback manager
+2021-09-24T11:38:57.921Z [INFO]  core: restoring leases
+2021-09-24T11:38:57.927Z [INFO]  expiration: lease restore complete
+2021-09-24T11:38:58.011Z [INFO]  identity: entities restored
+2021-09-24T11:38:58.013Z [INFO]  identity: groups restored
+2021-09-24T11:38:58.018Z [INFO]  core: usage gauge collection is disabled
+2021-09-24T11:38:58.104Z [INFO]  core: post-unseal setup complete
+2021-09-24T11:38:58.120Z [INFO]  core: root token generated
+2021-09-24T11:38:58.120Z [INFO]  core: pre-seal teardown starting
+2021-09-24T11:38:58.120Z [INFO]  rollback: stopping rollback manager
+2021-09-24T11:38:58.120Z [INFO]  core: pre-seal teardown complete
+```
+
+Обратим внимание на параметры Initialized, Sealed
+
+```console
+kubectl exec -it vault-0 -- vault status
+
+Key                Value
+---                -----
+Seal Type          shamir
+Initialized        true
+Sealed             true
+Total Shares       1
+Threshold          1
+Unseal Progress    0/1
+Unseal Nonce       n/a
+Version            1.8.2
+Storage Type       consul
+HA Enabled         true
+command terminated with exit code 2
+
+```
+
+Распечатаем vault и обратим внимание на переменные окружения в подах
+
+```console
+kubectl exec -it vault-0 -- env | grep VAULT
+VAULT_K8S_POD_NAME=vault-0
+VAULT_ADDR=http://127.0.0.1:8200
+VAULT_API_ADDR=http://10.20.1.12:8200
+VAULT_K8S_NAMESPACE=default
+VAULT_CLUSTER_ADDR=https://vault-0.vault-internal:8201
+VAULT_UI_PORT_8200_TCP_PROTO=tcp
+VAULT_ACTIVE_SERVICE_PORT_HTTP=8200
+VAULT_ACTIVE_PORT_8200_TCP_PROTO=tcp
+VAULT_AGENT_INJECTOR_SVC_SERVICE_PORT_HTTPS=443
+VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP_PORT=443
+VAULT_STANDBY_PORT_8201_TCP_ADDR=10.30.70.7
+VAULT_PORT_8201_TCP_PORT=8201
+VAULT_AGENT_INJECTOR_SVC_SERVICE_PORT=443
+VAULT_STANDBY_PORT=tcp://10.30.70.7:8200
+VAULT_UI_PORT_8200_TCP=tcp://10.30.93.163:8200
+VAULT_ACTIVE_PORT_8200_TCP_PORT=8200
+VAULT_STANDBY_PORT_8200_TCP=tcp://10.30.70.7:8200
+VAULT_ACTIVE_PORT=tcp://10.30.178.22:8200
+VAULT_PORT=tcp://10.30.3.105:8200
+VAULT_PORT_8201_TCP_ADDR=10.30.3.105
+VAULT_STANDBY_SERVICE_PORT_HTTPS_INTERNAL=8201
+VAULT_STANDBY_PORT_8200_TCP_PROTO=tcp
+VAULT_ACTIVE_PORT_8201_TCP_PORT=8201
+VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP_PROTO=tcp
+VAULT_PORT_8200_TCP=tcp://10.30.3.105:8200
+VAULT_PORT_8200_TCP_PORT=8200
+VAULT_AGENT_INJECTOR_SVC_PORT=tcp://10.30.84.110:443
+VAULT_SERVICE_PORT_HTTPS_INTERNAL=8201
+VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP_ADDR=10.30.84.110
+VAULT_UI_SERVICE_PORT_HTTP=8200
+VAULT_ACTIVE_SERVICE_PORT_HTTPS_INTERNAL=8201
+VAULT_ACTIVE_PORT_8201_TCP_PROTO=tcp
+VAULT_AGENT_INJECTOR_SVC_SERVICE_HOST=10.30.84.110
+VAULT_STANDBY_SERVICE_PORT_HTTP=8200
+VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP=tcp://10.30.84.110:443
+VAULT_SERVICE_PORT=8200
+VAULT_PORT_8201_TCP_PROTO=tcp
+VAULT_STANDBY_PORT_8201_TCP=tcp://10.30.70.7:8201
+VAULT_UI_SERVICE_HOST=10.30.93.163
+VAULT_ACTIVE_SERVICE_HOST=10.30.178.22
+VAULT_ACTIVE_PORT_8201_TCP=tcp://10.30.178.22:8201
+VAULT_ACTIVE_PORT_8201_TCP_ADDR=10.30.178.22
+VAULT_ACTIVE_PORT_8200_TCP=tcp://10.30.178.22:8200
+VAULT_STANDBY_PORT_8200_TCP_PORT=8200
+VAULT_STANDBY_PORT_8201_TCP_PROTO=tcp
+VAULT_PORT_8200_TCP_ADDR=10.30.3.105
+VAULT_UI_SERVICE_PORT=8200
+VAULT_SERVICE_PORT_HTTP=8200
+VAULT_UI_PORT=tcp://10.30.93.163:8200
+VAULT_UI_PORT_8200_TCP_PORT=8200
+VAULT_UI_PORT_8200_TCP_ADDR=10.30.93.163
+VAULT_STANDBY_SERVICE_HOST=10.30.70.7
+VAULT_STANDBY_SERVICE_PORT=8200
+VAULT_STANDBY_PORT_8200_TCP_ADDR=10.30.70.7
+VAULT_PORT_8200_TCP_PROTO=tcp
+VAULT_STANDBY_PORT_8201_TCP_PORT=8201
+VAULT_ACTIVE_SERVICE_PORT=8200
+VAULT_PORT_8201_TCP=tcp://10.30.3.105:8201
+VAULT_ACTIVE_PORT_8200_TCP_ADDR=10.30.178.22
+VAULT_SERVICE_HOST=10.30.3.105
+
+```
+
+Распечатать нужно каждый под
+
+```console
+kubectl exec -it vault-0 -- vault operator unseal 'sHXATMp0xRzIkzSM3Teq3Io8l6kzhAw+TUW8FoLFw9g='
+kubectl exec -it vault-1 -- vault operator unseal 'sHXATMp0xRzIkzSM3Teq3Io8l6kzhAw+TUW8FoLFw9g='
+kubectl exec -it vault-2 -- vault operator unseal 'sHXATMp0xRzIkzSM3Teq3Io8l6kzhAw+TUW8FoLFw9g='
+
+
+Sealed                 false
+
+(gcp-cluster-prod-2 # N/A) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-vault# kubectl exec -it vault-0 -- vault status
+Key             Value
+---             -----
+Seal Type       shamir
+Initialized     true
+Sealed          false
+Total Shares    1
+Threshold       1
+Version         1.8.2
+Storage Type    consul
+Cluster Name    vault-cluster-9a309ef2
+Cluster ID      4bd08241-8ba3-ec43-b01a-f55fb69d8b80
+HA Enabled      true
+HA Cluster      https://vault-0.vault-internal:8201
+HA Mode         active
+Active Since    2021-09-24T11:41:23.642874217Z
+(gcp-cluster-prod-2 # N/A) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-vault# kubectl exec -it vault-1 -- vault status
+Key                    Value
+---                    -----
+Seal Type              shamir
+Initialized            true
+Sealed                 false
+Total Shares           1
+Threshold              1
+Version                1.8.2
+Storage Type           consul
+Cluster Name           vault-cluster-9a309ef2
+Cluster ID             4bd08241-8ba3-ec43-b01a-f55fb69d8b80
+HA Enabled             true
+HA Cluster             https://vault-0.vault-internal:8201
+HA Mode                standby
+Active Node Address    http://10.20.1.12:8200
+(gcp-cluster-prod-2 # N/A) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-vault# kubectl exec -it vault-2 -- vault status
+Key                    Value
+---                    -----
+Seal Type              shamir
+Initialized            true
+Sealed                 false
+Total Shares           1
+Threshold              1
+Version                1.8.2
+Storage Type           consul
+Cluster Name           vault-cluster-9a309ef2
+Cluster ID             4bd08241-8ba3-ec43-b01a-f55fb69d8b80
+HA Enabled             true
+HA Cluster             https://vault-0.vault-internal:8201
+HA Mode                standby
+Active Node Address    http://10.20.1.12:8200
+
+```
+
+Посмотрим список доступных авторизаций
+
+```console
+kubectl exec -it vault-0 -- vault auth list
+Error listing enabled authentications: Error making API request.
+
+URL: GET http://127.0.0.1:8200/v1/sys/auth
+Code: 400. Errors:
+
+* missing client token
+command terminated with exit code 2
+```
+
+Залогинимся в vault (у нас есть root token)
+
+
+```console
+kubectl exec -it vault-0 -- vault login
+Token (will be hidden): 
+Success! You are now authenticated. The token information displayed below
+is already stored in the token helper. You do NOT need to run "vault login"
+again. Future Vault requests will automatically use this token.
+
+Key                  Value
+---                  -----
+token                s.CySODY31NAYBmbbex14D7cgn
+token_accessor       qABDWgQRVbSVKeIhBylQQK2Q
+token_duration       ∞
+token_renewable      false
+token_policies       ["root"]
+identity_policies    []
+policies             ["root"]
+```
+
+Повторно запросим список авторизаций:
+
+```console
+Path      Type     Accessor               Description
+----      ----     --------               -----------
+token/    token    auth_token_2f740c55    token based credentials
+```
+
+Заведем секреты
+
+```console
+kubectl exec -it vault-0 -- vault secrets enable --path=otus kv
+Success! Enabled the kv secrets engine at: otus/
+kubectl exec -it vault-0 -- vault secrets list --detailed
+Path          Plugin       Accessor              Default TTL    Max TTL    Force No Cache    Replication    Seal Wrap    External Entropy Access    Options    Description                                                UUID
+----          ------       --------              -----------    -------    --------------    -----------    ---------    -----------------------    -------    -----------                                                ----
+cubbyhole/    cubbyhole    cubbyhole_354bba14    n/a            n/a        false             local          false        false                      map[]      per-token private secret storage                           32276e35-d849-a502-d1e2-5e5be90e55ce
+identity/     identity     identity_e5a6a4ca     system         system     false             replicated     false        false                      map[]      identity store                                             40d73211-4177-1077-bbae-1dda02f24052
+otus/         kv           kv_84ac293b           system         system     false             replicated     false        false                      map[]      n/a                                                        791c6a81-11e8-ce25-9261-c8348f4ba48a
+sys/          system       system_a832c5b9       n/a            n/a        false             replicated     false        false                      map[]      system endpoints used for control, policy and debugging    2ba7a4af-0ec7-5d78-01fc-5b1d6eef2e7b
+kubectl exec -it vault-0 -- vault kv put otus/otus-ro/config username='otus' password='asajkjkahs'
+Success! Data written to: otus/otus-ro/config
+kubectl exec -it vault-0 -- vault kv put otus/otus-rw/config username='otus' password='asajkjkahs'
+Success! Data written to: otus/otus-rw/config
+kubectl exec -it vault-0 -- vault read otus/otus-ro/config
+Key                 Value
+---                 -----
+refresh_interval    768h
+password            asajkjkahs
+username            otus
+kubectl exec -it vault-0 -- vault kv get otus/otus-rw/config
+====== Data ======
+Key         Value
+---         -----
+password    asajkjkahs
+username    otus
+```
+
+### Включим авторизацию через k8s
+
+```console
+kubectl exec -it vault-0 -- vault auth enable kubernetes
+Success! Enabled kubernetes auth method at: kubernetes/
+kubectl exec -it vault-0 -- vault auth list
+Path           Type          Accessor                    Description
+----           ----          --------                    -----------
+kubernetes/    kubernetes    auth_kubernetes_9521f02d    n/a
+token/         token         auth_token_2f740c55         token based credentials
+```
+
+Создадим yaml для ClusterRoleBinding
+
+```console
+$ tee vault-auth-service-account.yml <<EOF
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: role-tokenreview-binding
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: vault-auth
+    namespace: default
+
+```
+
+Создадим Service Account vault-auth и применим ClusterRoleBinding
+
+```console
+# Create a service account, 'vault-auth'
+$ kubectl create serviceaccount vault-auth
+serviceaccount/vault-auth created
+# Update the 'vault-auth' service account
+$ kubectl apply --filename vault-auth-service-account.yml
+clusterrolebinding.rbac.authorization.k8s.io/role-tokenreview-binding created
+```
+
+Подготовим переменные для записи в конфиг кубер авторизации
+
+```console
+export VAULT_SA_NAME=$(kubectl get sa vault-auth -o jsonpath="{.secrets[*]['name']}")
+
+export SA_JWT_TOKEN=$(kubectl get secret $VAULT_SA_NAME -o jsonpath="{.data.token}" | base64 --decode; echo)
+
+
+export SA_CA_CRT=$(kubectl get secret $VAULT_SA_NAME -o jsonpath="{.data['ca\.crt']}" | base64 --decode; echo)
+
+
+### alternative way
+export K8S_HOST=$(kubectl cluster-info | grep 'Kubernetes master' | awk '/https/ {print $NF}' | sed 's/\x1b\[[0-9;]*m//g' )
+
+
+```
+
+Запишем конфиг в vault
+
+```console
+kubectl exec -it vault-0 -- vault write auth/kubernetes/config token_reviewer_jwt="$SA_JWT_TOKEN" kubernetes_host="$K8S_HOST" kubernetes_ca_cert="$SA_CA_CRT" disable_iss_validation="true"
+Success! Data written to: auth/kubernetes/config
+```
+
+Внимательно проверяем, что получилось:
+
+```console
+kubectl exec -it vault-0 -- vault read auth/kubernetes/config
+Key                       Value
+---                       -----
+disable_iss_validation    true
+disable_local_ca_jwt      false
+issuer                    n/a
+kubernetes_ca_cert        -----BEGIN CERTIFICATE-----
+....
+-----END CERTIFICATE-----
+kubernetes_host           https://34.107.123.136
+pem_keys                  []
+
+```
+
+Создадим файл политики:
+
+```console
+tee otus-policy.hcl <<EOF
+path "otus/otus-ro/*" {
+  capabilities = ["read", "list"]
+}
+path "otus/otus-rw/*" {
+  capabilities = ["read", "create", "list"]
+}
+EOF
+```
+
+Создадим политику и роль в vault
+
+```console
+kubectl cp otus-policy.hcl vault-0:/tmp
+kubectl exec -it vault-0 -- vault policy write otus-policy /tmp/otus-policy.hcl
+Success! Uploaded policy: otus-policy
+kubectl exec -it vault-0 -- vault write auth/kubernetes/role/otus bound_service_account_names=vault-auth bound_service_account_namespaces=default policies=otus-policy ttl=24h
+Success! Data written to: auth/kubernetes/role/otus
+```
+
+Проверим как работает авторизация. Создадим под с привязанным сервис аккаунтом и установим туда curl и jq
+
+```console
+kubectl run --generator=run-pod/v1 tmp --rm -i --tty --serviceaccount=vault-auth --image alpine:3.7
+Flag --generator has been deprecated, has no effect and will be removed in the future.
+If you don't see a command prompt, try pressing enter.
+
+apk add curl jq
+```
+
+Залогинимся и получим клиентский токен
+
+```console
+#VAULT_ADDR=http://vault:8200
+#KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+#curl --request POST --data '{"jwt": "'$KUBE_TOKEN'", "role": "otus"}' $VAULT_ADDR/v1/auth/kubernetes/login | jq
+```
+
+```json
+{
+  "request_id": "7831e2bd-e678-9119-b3f7-414f11df0e74",
+  "lease_id": "",
+  "renewable": false,
+  "lease_duration": 0,
+  "data": null,
+  "wrap_info": null,
+  "warnings": null,
+  "auth": {
+    "client_token": "s.yYkNr4PwzObcDbNWzbNjb3DV",
+    "accessor": "tBubLc2z5y4gDTBPK4088cLa",
+    "policies": [
+      "default",
+      "otus-policy"
+    ],
+    "token_policies": [
+      "default",
+      "otus-policy"
+    ],
+    "metadata": {
+      "role": "otus",
+      "service_account_name": "vault-auth",
+      "service_account_namespace": "default",
+      "service_account_secret_name": "vault-auth-token-hp7hk",
+      "service_account_uid": "88951275-8de4-4071-a405-6358ea392ca5"
+    },
+    "lease_duration": 86400,
+    "renewable": true,
+    "entity_id": "61525b73-a617-6a6d-aabe-93159f89d93c",
+    "token_type": "service",
+    "orphan": true
+  }
+}
+```
+
+```console
+#TOKEN=$(curl -k -s --request POST --data '{"jwt": "'$KUBE_TOKEN'", "role": "otus"}' $VAULT_ADDR/v1/auth/kubernetes/login | jq '.auth.client_token' | awk -F\" '{print $2}')
+echo $TOKEN
+s.Xx94tZJg9ghdAMXK320IQvrB
+```
+
+Прочитаем записанные ранее секреты и попробуем их обновить
+- используем свой клиентский токен
+- проверим чтение
+
+```console
+#curl --header "X-Vault-Token:$TOKEN" $VAULT_ADDR/v1/otus/otus-ro/config
+{"request_id":"8df66e11-e528-2e43-2dfe-30ee088db9c1","lease_id":"","renewable":false,"lease_duration":2764800,"data":{"password":"asajkjkahs","username":"otus"},"wrap_info":null,"warnings":null,"auth":null}
+# curl --header "X-Vault-Token:$TOKEN" $VAULT_ADDR/v1/otus/otus-rw/config
+{"request_id":"98e739cd-406c-92fc-5f37-3828cc510222","lease_id":"","renewable":false,"lease_duration":2764800,"data":{"password":"asajkjkahs","username":"otus"},"wrap_info":null,"warnings":null,"auth":null}
+```
+- проверим запись
+
+```console
+#curl --request POST --data '{"bar": "baz"}' --header "X-Vault-Token:$TOKEN" $VAULT_ADDR/v1/otus/otus-ro/config
+{"errors":["1 error occurred:\n\t* permission denied\n\n"]}
+curl --request POST --data '{"bar": "baz"}' --header "X-Vault-Token:$TOKEN" $VAULT_ADDR/v1/otus/otus-rw/config
+{"errors":["1 error occurred:\n\t* permission denied\n\n"]}
+curl --request POST --data '{"bar": "baz"}' --header "X-Vault-Token:$TOKEN" $VAULT_ADDR/v1/otus/otus-rw/config1
+write ok
+```
+
+Причина подобного поведения связана с политикой, согласно которой:
+
+```yml
+path "otus/otus-ro/*" {
+  capabilities = ["read", "list"]
+}
+path "otus/otus-rw/*" {
+  capabilities = ["read", "create", "list"]
+}
+```
+
+create в otus/otus-rw у нас есть, а вот update нет.
+
+Обновим otus-policy.hcl
+
+```yml
+path "otus/otus-ro/*" {
+    capabilities = ["read", "list"] 
+}
+path "otus/otus-rw/*" {
+    capabilities = ["read", "create", "update", "list"]
+}
+```
+
+И применим новую политику. Кстати, менять можно в UI :) 
+
+```console
+kubectl cp otus-policy.hcl vault-0:/tmp
+kubectl exec -it vault-0 -- vault policy write otus-policy /tmp/otus-policy.hcl
+Success! Uploaded policy: otus-policy
+```
+
+Проверяем запись.
+
+```console
+curl --request POST --data '{"bar": "baz"}' --header "X-Vault-Token:$TOKEN" $VAULT_ADDR/v1/otus/otus-rw/config
+{"request_id":"56e7b20e-8867-efb0-5c1d-a190aa16d9d3","lease_id":"","renewable":false,"lease_duration":2764800,"data":{"bar":"baz"},"wrap_info":null,"warnings":null,"auth":null}
+```
+</details>
+
+<details>
+<summary> <b>Use case использования авторизации через кубер</b></summary>
+
+- Авторизуемся через vault-agent и получим клиентский токен
+- Через consul-template достанем секрет и положим его в nginx
+- Итог - nginx получил секрет из волта, не зная ничего про волт
+
+Я проделаю Demo Игоря Саблина от простого к сложному чтобы понять принцип. Начинаем с примитивного варианта с использованием busybox.yml (выше в общем-то аналогичный вариант)
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bash
+  labels:
+    app: bash
+spec:
+  serviceAccountName: vault-auth
+  containers:
+  - name: bash
+    image: bash
+    command: ["/bin/sh", "-ec", "sleep 3600"]
+```
+
+```console
+ka busybox.yml
+kubectl exec -it bash -- bash 
+apk update
+apk add curl jq
+export KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+curl --request POST      --data '{"jwt": "'"$KUBE_TOKEN"'", "role": "otus"}'      http://vault:8200/v1/auth/kubernetes/login | jq "."
+```
+
+Забираем наш client_token s.TJT3N9K7nbe97V2KpoXKxlJY
+
+```console
+curl --silent \
+     --header "X-Vault-Token: s.TJT3N9K7nbe97V2KpoXKxlJY" \
+     --request GET \
+     http://vault:8200/v1/otus/otus-ro/config | jq ".data"
+
+{
+  "password": "asajkjkahs",
+  "username": "otus"
+}
+
+curl --silent \
+     --header "X-Vault-Token: s.TJT3N9K7nbe97V2KpoXKxlJY" \
+     --request GET \
+     http://vault:8200/v1/otus/otus-rw/config | jq ".data"
+```
+{
+  "bar": "baz"
+}
+
+Идем дальше: используем агент.
+
+Создаём:
+- medium/configmap.yaml с описанием конфига для агента и шаблоном для генерации index.html
+- medium/vault-init-container.yaml где описываем:
+
+Подмапливание нашего конфига и шаблона
+
+```yaml
+  volumes:
+  - configMap:
+      items:
+      - key: vault-agent-config.hcl
+        path: vault-agent-config.hcl
+      name: example-vault-agent-config
+    name: config
+  - emptyDir: {}
+    name: shared-data
+```
+
+Описываем init контейнер vault, который будет стартовать как агент и забирать конфиг из /etc/vault/vault-agent-config.hcl
+А класть сгенерированный файл с секретами в /etc/secrets
+
+```yaml
+  initContainers:
+  - args:
+    - agent
+    - -config=/etc/vault/vault-agent-config.hcl
+    - -log-level=debug
+    env:
+    - name: VAULT_ADDR
+      value: http://vault:8200
+    image: vault
+    name: vault-agent
+    volumeMounts:
+    - mountPath: /etc/vault
+      name: config
+    - mountPath: /etc/secrets
+      name: shared-data
+```      
+
+Затем будет запущен контейнер nginx, который возьмет shared-data (в котором init контейнер vault уже сгенерировал index.html с нужными секретами из нашего vault сервера) и примапит ее в стандартный для nginx каталог /usr/share/nginx/html
+
+```yaml
+  containers:
+  - image: nginx
+    name: nginx-container
+    ports:
+    - containerPort: 80
+    volumeMounts:
+    - mountPath: /usr/share/nginx/html
+      name: shared-data
+``` 
+
+Проверяем:
+
+```console
+kubectl exec -it vault-agent-example -- bash
+curl localhost
+<html>
+<body>
+<p>Some secrets:</p>
+<ul>
+<li><pre>username: otus</pre></li>
+<li><pre>password: asajkjkahs</pre></li> 
+</ul>
+
+</body>
+</html>
+```
+
+Красота.
+
+Делаем непосредственно задание. Оно состоит из трех частей: 
+- vault agent для авторизации.
+- consul шаблонизатора.
+- непосредственно nginx контейнера.
+
+Создаем два configmap файла. Один для vault agent, другой для consul.
+
+configmap-vault-agent.yaml
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-agent-config
+  namespace: default
+data:
+  vault-agent-config.hcl: |
+    # Comment this out if running as sidecar instead of initContainer
+    exit_after_auth = true
+
+    pid_file = "/home/vault/pidfile"
+
+    auto_auth {
+        method "kubernetes" {
+            mount_path = "auth/kubernetes"
+            config = {
+                role = "otus"
+            }
+        }
+
+        sink "file" {
+            config = {
+                path = "/home/vault/.vault-token"
+            }
+        }
+    }
+
+```
+
+configmap-consul.yaml
+
+```yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consul-config
+  namespace: default
+data:
+  configmap-consul.hcl: |
+    vault {
+      renew_token = false
+      vault_agent_token_file = "/home/vault/.vault-token"
+      retry {
+        backoff = "1s"
+      }
+    }
+    template {
+    destination = "/etc/secrets/index.html"
+    contents = <<EOT
+    <html>
+    <body>
+    <p>Some secrets:</p>
+    {{- with secret "otus/otus-ro/config" }}
+    <ul>
+    <li><pre>username: {{ .Data.username }}</pre></li>
+    <li><pre>password: {{ .Data.password }}</pre></li> 
+    </ul>
+    {{ end }}
+    </body>
+    </html>
+    EOT
+    }
+
+
+
+```
+
+Указываем в volumes оба configMap и две emptyDir:
+
+```yaml
+  volumes:
+  - configMap:
+      name: vault-agent-config
+      items:
+      - key: vault-agent-config.hcl
+        path: vault-agent-config.hcl
+    name: vault-agent-config
+
+  - configMap:
+      name: consul-config
+      items:
+      - key: configmap-consul.hcl
+        path: configmap-consul.hcl
+    name: consul-config
+
+  - emptyDir: {}
+    name: shared-data
+  - emptyDir: {}
+    name: vault-token    
+```
+  
+Описываем  initContainers vault-agent. Он в нашем случае будет выполнять только авторизацию и класть vault-token в /home/vault
+
+```yaml
+  initContainers:
+  - name: vault-agent
+    args:
+    - agent
+    - -config=/etc/vault/vault-agent-config.hcl
+    - -log-level=debug
+    env:
+    - name: VAULT_ADDR
+      value: http://vault:8200
+    image: vault
+
+    volumeMounts:
+    - mountPath: /etc/vault
+      name: vault-agent-config
+    - name: vault-token
+      mountPath: /home/vault
+```
+
+Описываем container consul-template. Он берет vault-token из /home/vault и генерирует секреты в /etc/secrets. Шаблон берется из configMap consul-config.
+
+
+```yaml
+  containers:
+  - name: consul-template
+    image: hashicorp/consul-template:alpine
+    imagePullPolicy: Always
+    volumeMounts:
+      - name: vault-token
+        mountPath: /home/vault
+      - name: consul-config
+        mountPath: /etc/consul-template
+      - name: shared-data
+        mountPath: /etc/secrets
+    env:
+      - name: HOME
+        value: /home/vault
+      - name: VAULT_ADDR
+        value: http://vault:8200
+    args: ["-config=/etc/consul-template/configmap-consul.hcl"]
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+```
+
+Затем будет запущен контейнер nginx, который возьмет shared-data (в котором контейнер consul-template уже сгенерировал index.html с нужными секретами из нашего vault сервера) и примапит ее в стандартный для nginx каталог /usr/share/nginx/html
+
+```console
+curl localhost
+Some secrets:
+
+username: otus
+password: asajkjkahs
+Some secrets:
+
+username: otus
+password: asajkjkahs
+```
+</details>
+
+<details>
+<summary> <b>Создадим CA на базе vault</b></summary>
+
+- Включим pki секретс
+
+```console
+kubectl exec -it vault-0 -- vault secrets enable pki
+Success! Enabled the pki secrets engine at: pki/
+
+kubectl exec -it vault-0 -- vault secrets tune -max-lease-ttl=87600h pki
+Success! Tuned the secrets engine at: pki/
+
+kubectl exec -it vault-0 -- vault write -field=certificate pki/root/generate/internal common_name="exmaple.ru" ttl=87600h > CA_cert.crt
+```
+
+Пропишем урлы для ca и отозванных сертификатов
+
+```console
+kubectl exec -it vault-0 -- vault write pki/config/urls issuing_certificates="http://vault:8200/v1/pki/ca" crl_distribution_points="http://vault:8200/v1/pki/crl"
+Success! Data written to: pki/config/urls
+```
+
+Создадим промежуточный сертификат
+
+```console
+kubectl exec -it vault-0 -- vault secrets enable --path=pki_int pki
+Success! Enabled the pki secrets engine at: pki_int/
+kubectl exec -it vault-0 -- vault secrets tune -max-lease-ttl=87600h pki_int
+Success! Tuned the secrets engine at: pki_int/
+kubectl exec -it vault-0 -- vault write -format=json pki_int/intermediate/generate/internal common_name="example.ru Intermediate Authority" | jq -r '.data.csr' > pki_intermediate.csr
+```
+
+Пропишем промежуточный сертификат в vault
+
+```console
+kubectl cp pki_intermediate.csr vault-0:./tmp
+kubectl exec -it vault-0 -- vault write -format=json pki/root/sign-intermediate csr=@/tmp/pki_intermediate.csr format=pem_bundle ttl="43800h" | jq -r '.data.certificate' > intermediate.cert.pem
+kubectl cp intermediate.cert.pem vault-0:./tmp
+kubectl exec -it vault-0 -- vault write pki_int/intermediate/set-signed certificate=@/tmp/intermediate.cert.pem
+Success! Data written to: pki_int/intermediate/set-signed
+```
+
+Создадим и отзовем новые сертификаты
+
+Создадим роль для выдачи сертификатов:
+
+```console
+kubectl exec -it vault-0 -- vault write pki_int/roles/example-dot-ru allowed_domains="example.ru" allow_subdomains=true max_ttl="720h"
+Success! Data written to: pki_int/roles/example-dot-ru
+```
+
+Создадим и отзовем сертификат:
+
+```console
+kubectl exec -it vault-0 -- vault write pki_int/issue/example-dot-ru common_name="gitlab.example.ru" ttl="24h"
+Key                 Value
+---                 -----
+ca_chain            [-----BEGIN CERTIFICATE-----
+MIIDnDCCAoSgAwIBAgIUDuxUYhUe7OEOyz8RUzT0xQtBI+kwDQYJKoZIhvcNAQEL
+BQAwFTETMBEGA1UEAxMKZXhtYXBsZS5ydTAeFw0yMTA5MjQxODIxNDlaFw0yNjA5
+MjMxODIyMTlaMCwxKjAoBgNVBAMTIWV4YW1wbGUucnUgSW50ZXJtZWRpYXRlIEF1
+dGhvcml0eTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANV44AD4AXJx
+z8u7b7Y+LJiyyEPPm+m5EgtemrOiQDFBV6/cNK4WntUwFRxM/8CrpP/aViVoHlUb
+by9DtbacjLI7dRvVkuGZVm3+SmsdSge9tn2koTlhHDu62SbaRRK3l1u0YsaCZt7D
+56F/m//IsNJQSMSpQG+pS2mUJOFqCQosEgcPRxYWuy9S8i7wHZtVyTDNRqIMzx8/
+sEGA5Ax23P96O0siUN4azbf3+UI2B37LfvIPfO4ufr+f63oEfvUX6clrIMwqZTzA
+Oss1iu3IwVsZDymUVrlKEp1pwp22Gppxd8+1m68uZXjAnDcS7CeI5/2w3Jd56vEZ
+XSluDTBCeU8CAwEAAaOBzDCByTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUw
+AwEB/zAdBgNVHQ4EFgQU0Us447XWKp/2jjDOn6ZLQKnd79swHwYDVR0jBBgwFoAU
+XzzfSYUeH+tkDdaWZwYzs6Di3JcwNwYIKwYBBQUHAQEEKzApMCcGCCsGAQUFBzAC
+hhtodHRwOi8vdmF1bHQ6ODIwMC92MS9wa2kvY2EwLQYDVR0fBCYwJDAioCCgHoYc
+aHR0cDovL3ZhdWx0OjgyMDAvdjEvcGtpL2NybDANBgkqhkiG9w0BAQsFAAOCAQEA
+nEX3iE8LhM5rxtRoZch7iFPv9tXTj8VAB7ItVtvWX1mS2DreGUysPYBSdK4QvPOq
+v4BF3wLAnTC+0M50pw0fAMI9icjVNpNTCQBihd0QXuvW/5wKBCMVDpMknIjjNt7S
+I2nCnJ9+xTGHrTvUCW7F5z0XBOZT3zRNk1VUvjpPskfKHb2Z3ZFcIpzUOMJrRXKL
+SYIhNq5w9inWy1YIv0Zi10+2+n3Fuusz+7p71vT5BrtR1nlUUvtNpmOjokYzk4d3
+Oe6LuJBEs0E4rWlOH0WXDswdTmMNISfqyyrixk58aiUxeki/3aPEtu1JFtyYYb9P
++LNeqWapMWq8kb0pQLaz/A==
+-----END CERTIFICATE-----]
+certificate         -----BEGIN CERTIFICATE-----
+MIIDZzCCAk+gAwIBAgIUdbJDO03HgpbbihwWKPlLR4y5Qu0wDQYJKoZIhvcNAQEL
+BQAwLDEqMCgGA1UEAxMhZXhhbXBsZS5ydSBJbnRlcm1lZGlhdGUgQXV0aG9yaXR5
+MB4XDTIxMDkyNDE4MjgxOFoXDTIxMDkyNTE4Mjg0OFowHDEaMBgGA1UEAxMRZ2l0
+bGFiLmV4YW1wbGUucnUwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDQ
+EqXbfAia6LT7FQ/8tzVtsZXAFN+Jd2b/0StnsgfibibVZG1A6bY6Nit9Oep3Pxa7
+h1Du7ijoYnYeW7MjqVrRPvGVkjG92wM5O3QMy+Dafr/3L0jOA2rxpqZM9aFK1bn0
+dAclVXPePSOuRT0xyZW3nB15jXBLO2w/xPikont26ZTTwS+jdPDkNJKxyLSMBMXx
+SpolnEPoiIHpaDyQtCv1ukZLd+2hcYLr9yVkBxbV6IA5HbbQ/QDD1GcA9Shunk/K
+1ElGOtSD6Gqt6TzBRwgRKwh9rw6aTXWUJaKahQbYT5lQXShj/AWMuaj6qxpXdDQF
+Mj8JRTdTfve/H2mHUEedAgMBAAGjgZAwgY0wDgYDVR0PAQH/BAQDAgOoMB0GA1Ud
+JQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjAdBgNVHQ4EFgQUVL3E+9kYx7FLX8U8
+U3HyqrGcigkwHwYDVR0jBBgwFoAU0Us447XWKp/2jjDOn6ZLQKnd79swHAYDVR0R
+BBUwE4IRZ2l0bGFiLmV4YW1wbGUucnUwDQYJKoZIhvcNAQELBQADggEBAIQ6DuBi
+7u9zf1Ldl+ffVafAFnSHgkMzDy5YIlJBu/kgq5xHVR7sTOoj/6oveEdIjG6YxWnZ
+g9C/8qAZL+8XAIkA2XPk0eUDYkOTzvp9H0ahh4Qw+vJPlfvkV8BW/vCBFPCcN6DM
+3oruYfos8nTGoODQMIMTy6EUWBKpE8/sxvkH1lKqw5k14bGIJ9WLmafiOr5Njl4W
+A+fQ1t/Jp8czwfznECaWL+RO7YzCAm5SPcrkmlh1Wyxj8qAq/5GHiLggAkgz9Yxd
+XcYtqGKhB/S7ll0wofDysZ9Zds9VICSENMKaz6o+IpKC+jDfLGi/U6Ja0bhWoEya
+6juzS8b93vBDV9A=
+-----END CERTIFICATE-----
+expiration          1632594528
+issuing_ca          -----BEGIN CERTIFICATE-----
+MIIDnDCCAoSgAwIBAgIUDuxUYhUe7OEOyz8RUzT0xQtBI+kwDQYJKoZIhvcNAQEL
+BQAwFTETMBEGA1UEAxMKZXhtYXBsZS5ydTAeFw0yMTA5MjQxODIxNDlaFw0yNjA5
+MjMxODIyMTlaMCwxKjAoBgNVBAMTIWV4YW1wbGUucnUgSW50ZXJtZWRpYXRlIEF1
+dGhvcml0eTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANV44AD4AXJx
+z8u7b7Y+LJiyyEPPm+m5EgtemrOiQDFBV6/cNK4WntUwFRxM/8CrpP/aViVoHlUb
+by9DtbacjLI7dRvVkuGZVm3+SmsdSge9tn2koTlhHDu62SbaRRK3l1u0YsaCZt7D
+56F/m//IsNJQSMSpQG+pS2mUJOFqCQosEgcPRxYWuy9S8i7wHZtVyTDNRqIMzx8/
+sEGA5Ax23P96O0siUN4azbf3+UI2B37LfvIPfO4ufr+f63oEfvUX6clrIMwqZTzA
+Oss1iu3IwVsZDymUVrlKEp1pwp22Gppxd8+1m68uZXjAnDcS7CeI5/2w3Jd56vEZ
+XSluDTBCeU8CAwEAAaOBzDCByTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUw
+AwEB/zAdBgNVHQ4EFgQU0Us447XWKp/2jjDOn6ZLQKnd79swHwYDVR0jBBgwFoAU
+XzzfSYUeH+tkDdaWZwYzs6Di3JcwNwYIKwYBBQUHAQEEKzApMCcGCCsGAQUFBzAC
+hhtodHRwOi8vdmF1bHQ6ODIwMC92MS9wa2kvY2EwLQYDVR0fBCYwJDAioCCgHoYc
+aHR0cDovL3ZhdWx0OjgyMDAvdjEvcGtpL2NybDANBgkqhkiG9w0BAQsFAAOCAQEA
+nEX3iE8LhM5rxtRoZch7iFPv9tXTj8VAB7ItVtvWX1mS2DreGUysPYBSdK4QvPOq
+v4BF3wLAnTC+0M50pw0fAMI9icjVNpNTCQBihd0QXuvW/5wKBCMVDpMknIjjNt7S
+I2nCnJ9+xTGHrTvUCW7F5z0XBOZT3zRNk1VUvjpPskfKHb2Z3ZFcIpzUOMJrRXKL
+SYIhNq5w9inWy1YIv0Zi10+2+n3Fuusz+7p71vT5BrtR1nlUUvtNpmOjokYzk4d3
+Oe6LuJBEs0E4rWlOH0WXDswdTmMNISfqyyrixk58aiUxeki/3aPEtu1JFtyYYb9P
++LNeqWapMWq8kb0pQLaz/A==
+-----END CERTIFICATE-----
+private_key         -----BEGIN RSA PRIVATE KEY-----
+MIIEpQIBAAKCAQEA0BKl23wImui0+xUP/Lc1bbGVwBTfiXdm/9ErZ7IH4m4m1WRt
+QOm2OjYrfTnqdz8Wu4dQ7u4o6GJ2HluzI6la0T7xlZIxvdsDOTt0DMvg2n6/9y9I
+zgNq8aamTPWhStW59HQHJVVz3j0jrkU9McmVt5wdeY1wSztsP8T4pKJ7dumU08Ev
+o3Tw5DSSsci0jATF8UqaJZxD6IiB6Wg8kLQr9bpGS3ftoXGC6/clZAcW1eiAOR22
+0P0Aw9RnAPUobp5PytRJRjrUg+hqrek8wUcIESsIfa8Omk11lCWimoUG2E+ZUF0o
+Y/wFjLmo+qsaV3Q0BTI/CUU3U373vx9ph1BHnQIDAQABAoIBAQCdk4HIFsbtig6F
+mA3jdVwhFrwyG5yunp6CXgZhIZKXCJSgRs32uwgmTZ/h1lqatEyi+Hdyeyq/0tFh
+bFDeUQNWNDUA8RZ6kcJ/NWdNyZkf353BtS2N10jGeU64Oc1Mv090seo3e9+kDulW
+sVkGu4OG6dPomhTQ5M+1+5XSGLsn8Z/ZKqrKPS2TVJcILVX3NgtVP4d2Qf4yhenF
+n0VZv2fJ7rtaJxqjU5co/HHnTfCIqXd7hRw9o/VblmPv84x75OfBr1LBInwYUrqS
++PKT/4wxc5oGFFN68d2L4rVvQMm26IvTCdjgboLBbRrVOBivb+SXOokSYTsVPc7q
+ir6GEEQBAoGBAN7FQgoGs9PgIcIOxvRAq82Gbuo7GJMuRZb5Lf8LOcL45MMgEDCL
+OHze+T7rbrpgd8WX2dNkrtJ8Aem5prmA7ZneNp6g/agDm6TmdnVUndNeDZy/1Iao
+461+pJgGpJsveA3qM3cEHiH2yqZvbdw2JXkGnboVbGPJVxix92WrprpFAoGBAO8c
+JFir5fZ5FhAI0rhZJnNTMwSkUT49IO+AG9BKh3EG84ZswRdRZ262kSfQPXVD9HEn
+oyrgqwI2mI693BGXxaddjzOOWhKdRehpRDR1ev1RkY9tEVzI8nxV38alwMQr92LR
+gHNCx2zUPhcp7J/Nvt1KA8PFlBgWKKzU58MR45l5AoGAD2UQYEMAUGcPzipZQ23o
+sYZVyegVla4/7uP/cr2i2z96B6YCmGg2miKKlPeOKmEaRdRtoDc4AaHCPBWxWOZ5
+BQYfPi0f+mltayLmEsurMH0ycZ+sHzYyrb2vwDXNUFAiesuxjMsDDhPRA1l1/R7c
+zhVP9xkd6XNzimhaEXOgTQUCgYEA4NCx79k376TrtInHLmNL/rSkTGH+rSkmdWkb
+PZ1FeWUSxTot1rHIMVVgZ3Goxz/sbhPZm2//+aXBjLxAVR5BTdpu0Qev8r6Cw0Fu
+SnCHAfSWiqb+4yFgtLy9GPYxp4C7KeNXBYgtH0rzUi4t+BantUJpBcIYOwlilxXb
+DxMbzukCgYEAkYQOeh0wHfZO/dRG2OHB6RwkEMg5ZiK8N3KpNB+VMVLBnWogpW6c
+iWl8uRDDE7ef3uWHdGRkA7mrWAPYkhBoCp80WFkfOJSReoovJGjF+Bd3vO/hRwFC
+pnPqo55LRHKKCmYqJbgi4pHRmvkiAS0Cu+BQ/wNGtjA7G5mIRJY4fIo=
+-----END RSA PRIVATE KEY-----
+private_key_type    rsa
+serial_number       75:b2:43:3b:4d:c7:82:96:db:8a:1c:16:28:f9:4b:47:8c:b9:42:ed
+
+kubectl exec -it vault-0 -- vault write pki_int/revoke serial_number="75:b2:43:3b:4d:c7:82:96:db:8a:1c:16:28:f9:4b:47:8c:b9:42:ed"
+Key                        Value
+---                        -----
+revocation_time            1632508156
+revocation_time_rfc3339    2021-09-24T18:29:16.892443241Z
+```
+</details>
+
+<details>
+<summary> <b>🐍 Задание со 🌟 (1)</b></summary>
+
+- Реализовать доступ к vault через https
+- В README.md описать последовательность действий
+- Предоставить примеры работы курлом
+
+Воспользуемся документацией:
+
+https://www.vaultproject.io/docs/platform/k8s/helm/examples/standalone-tls
+
+```console
+openssl genrsa -out vault.key 2048
+openssl req -new -key vault.key -subj "/CN=vault-server-tls.dafault.svc" -out server.csr -config csr.conf
+ka csr.yaml
+kubectl certificate approve vault-csr
+certificatesigningrequest.certificates.k8s.io/vault-csr approved
+serverCert=$(kubectl get csr vault-csr -o jsonpath='{.status.certificate}')
+echo "${serverCert}" | openssl base64 -d -A -out vault.crt
+kubectl config view --raw --minify --flatten -o jsonpath='{.clusters[].cluster.certificate-authority-data}' | base64 -d > vault.ca
+kubectl create secret generic vault-server-tls \
+        --namespace default \
+        --from-file=vault.key=vault.key \
+        --from-file=vault.crt=vault.crt \
+        --from-file=vault.ca=vault.ca
+secret/vault-server-tls created
+
+helm upgrade --install vault ../vault-helm -f vault-tls-values.yml
+
+
+```
+
+Не забываем, что нужно перезапустить поды и ансил.
+
+
+Для проверки используем наш bash контейнер.
+```console
+export KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+curl --cacert vault.ca --request POST      --data '{"jwt": "'"$KUBE_TOKEN"'", "role": "otus"}'      https://vault:8200/v1/auth/kubernetes/login | jq "."
+curl --cacert vault.ca --silent --header "X-Vault-Token: s.DvAW9GtLLDcfTSUtR22jrDw0" --request GET https://vault:8200/v1/otus/otus-ro/config | jq ".data"
+{
+  "password": "asajkjkahs",
+  "username": "otus"
+}
+```
+
+https работает! :)
+
+Все файлы включая сертификаты лежат в ./tls директории.
+
+Поигрался еще с injector-tls + certbot-manager по следующей инструкции:
+
+https://www.vaultproject.io/docs/platform/k8s/helm/examples/injector-tls-cert-manager
+
+</details>
+
+
+<details>
+<summary> <b>🐍 Задание со 🌟 (2)</b></summary>
+
+- Настроить autounseal
+- провайдер для autoanseal на ваш выбор
+- описать все в README.md
+
+Поскольку у меня все развернуть в GCP мы будем использовать:
+
+https://www.vaultproject.io/docs/configuration/seal/gcpckms
+
+Предлагается использовать следующий вариант:
+
+```yaml
+seal "gcpckms" {
+  credentials = "/usr/vault/vault-project-user-creds.json"
+  project     = "vault-project"
+  region      = "global"
+  key_ring    = "vault-keyring"
+  crypto_key  = "vault-key"
+}
+
+
+```
+
+https://www.vaultproject.io/docs/platform/k8s/helm/run#google-kms-auto-unseal
+
+Создаем keyring vault и vault-key и secret kms-creds в который кидаем chudinanton-gcp-key.json
+
+```console
+gcloud kms keyrings create vault --location global
+gcloud kms keys create vault-key --location global --keyring vault --purpose encryption
+kubectl create secret generic kms-creds --from-file=/Users/antonchudin/.ssh/chudinanton-gcp-key.json
+
+```
+
+Развернем заново vault
+
+```console
+helm upgrade --install vault ../vault-helm -f vault-tls-kms-values.yml
+```
+
+Смотрим на поды, видим, что они не готовы.
+
+```console
+kgpo
+NAME                                    READY   STATUS    RESTARTS   AGE
+bash                                    1/1     Running   2          153m
+consul-consul-7bv52                     1/1     Running   0          155m
+consul-consul-lmrjl                     1/1     Running   0          2d
+consul-consul-pnjld                     1/1     Running   0          2d
+consul-consul-server-0                  1/1     Running   0          2d
+consul-consul-server-1                  1/1     Running   0          2d
+consul-consul-server-2                  1/1     Running   0          2d
+consul-consul-t6tn9                     1/1     Running   0          2d
+vault-0                                 0/1     Running   0          21s
+vault-1                                 0/1     Running   0          21s
+vault-2                                 0/1     Running   0          21s
+vault-agent-consule-nginx               2/2     Running   0          42h
+vault-agent-injector-7b6857479b-5gg8r   1/1     Running   0          21s
+vault-agent-injector-7b6857479b-g59dq   1/1     Running   0          21s
+vault-agent-injector-7b6857479b-g62mn   1/1     Running   0          21s
+```
+
+Проводим инициализацию
+
+```console
+kubectl exec -it vault-0 -- vault operator init
+Recovery Key 1: Q25Ouy+rEtIjeCB9pk3mvSY4J7eir5nU9sKhfdqsWKim
+Recovery Key 2: 5VxJiN86FbyOCNEzRmS0KusyYXKQzGlYF45+fg+op1GI
+Recovery Key 3: S2iHL6YCm4I+SXABcIFk/fWq/fyjhqlu2ygvP1gVy9dm
+Recovery Key 4: J2JaCRk2R8colC3r4d3BRp9edBX6XafFH+D0fhj15B6N
+Recovery Key 5: CFsF525fXkrm51T5Eww3CgicjiI18OLeXunKTQO4tQKh
+
+Initial Root Token: s.T4BMuKsnr2J5eGxvxeLl2U8z
+
+Success! Vault is initialized
+
+Recovery key initialized with 5 key shares and a key threshold of 3. Please
+securely distribute the key shares printed above.
+```
+
+Проверяем, что автоансил отработал:
+
+```console
+kubectl exec -it vault-0 -- vault status
+Key                      Value
+---                      -----
+Recovery Seal Type       shamir
+Initialized              true
+Sealed                   false
+Total Recovery Shares    5
+Threshold                3
+Version                  1.8.2
+Storage Type             consul
+Cluster Name             vault-cluster-a29d34df
+Cluster ID               6f708114-cfeb-f3fd-9306-8b158df51065
+HA Enabled               true
+HA Cluster               https://vault-1.vault-internal:8201
+HA Mode                  standby
+Active Node Address      http://10.20.2.19:8200
+```
+
+Можно поиграться с падением подов. Если автоансил работать не будет, то мы это увидим в статусе пода.
+
+
+```console
+k delete pod vault-0
+pod "vault-0" deleted
+kg pod vault-0
+NAME      READY   STATUS    RESTARTS   AGE
+vault-0   1/1     Running   0          13s
+
+```
+
+Видим, что vault-0 вновь в READY статусе и по логам автоансил прошел успешно:
+
+
+```console
+==> Vault server configuration:
+
+             Api Address: http://10.20.3.11:8200
+                     Cgo: disabled
+         Cluster Address: https://vault-0.vault-internal:8201
+              Go Version: go1.16.7
+              Listener 1: tcp (addr: "[::]:8200", cluster address: "[::]:8201", max_request_duration: "1m30s", max_request_size: "33554432", tls: "enabled")
+               Log Level: info
+                   Mlock: supported: true, enabled: false
+           Recovery Mode: false
+                 Storage: consul (HA available)
+                 Version: Vault v1.8.2
+             Version Sha: aca76f63357041a43b49f3e8c11d67358496959f
+
+==> Vault server started! Log data will stream in below:
+
+2021-09-26T12:14:34.861Z [INFO]  proxy environment: http_proxy="" https_proxy="" no_proxy=""
+2021-09-26T12:14:34.861Z [WARN]  storage.consul: appending trailing forward slash to path
+2021-09-26T12:14:35.112Z [INFO]  core: stored unseal keys supported, attempting fetch
+2021-09-26T12:14:35.185Z [INFO]  core.cluster-listener.tcp: starting listener: listener_address=[::]:8201
+2021-09-26T12:14:35.185Z [INFO]  core.cluster-listener: serving cluster requests: cluster_listen_address=[::]:8201
+2021-09-26T12:14:35.185Z [INFO]  core: vault is unsealed
+2021-09-26T12:14:35.185Z [INFO]  core: entering standby mode
+2021-09-26T12:14:35.243Z [INFO]  core: unsealed with stored key
+```
+
+Задача по автоансилу выполнена!
+</details>
+
+<details>
+<summary> <b>🐍 Задание со 🌟 (3)</b></summary>
+
+- Настроить lease временных секретов для доступа к БД
+- Описать процесс в README.md
+
+Многое можно натыкать в UI. Но мы не ищем легких путей.
+
+Включаем поддержку DB в vault
+```console
+kubectl exec -it vault-0 -- vault login
+kubectl exec -it vault-0 -- vault secrets enable database
+Success! Enabled the database secrets engine at: database/
+kubectl exec -it vault-0 -- vault secrets list
+Path          Type         Accessor              Description
+----          ----         --------              -----------
+cubbyhole/    cubbyhole    cubbyhole_d344fb85    per-token private secret storage
+database/     database     database_b1758826     n/a
+identity/     identity     identity_9bda670b     identity store
+sys/          system       system_04c9b7e2       system endpoints used for control, policy and debugging
+```
+
+Разворачиваем DB mysql из mysql-deployment.yaml (сделано просто для примера в кубе)
+
+
+В mysql создадим пользователя vault:
+
+```console
+CREATE USER 'vaultuser'@'%' IDENTIFIED BY 'vaultpass';
+```
+
+И дадим ему соответствующие  права:
+
+```console
+GRANT CREATE USER ON *.* TO 'vaultuser'@'%' WITH GRANT OPTION;
+CREATE DATABASE wordpress;
+```
+
+Настраиваем подключение к БД в vault
+
+```console
+kubectl exec -it vault-0 -- vault write database/config/wordpress \
+ plugin_name=mysql-legacy-database-plugin \
+ connection_url="{{username}}:{{password}}@tcp(10.20.3.13:3306)/" \
+ allowed_roles="wordpress-role" \
+ username="vaultuser" \
+ password="vaultpass"
+
+```
+
+Создадим роль
+
+```console
+kubectl exec -it vault-0 -- vault write database/roles/wordpress-role \
+ db_name=wordpress \
+ creation_statements="CREATE USER '{{name}}'@'%' IDENTIFIED BY '{{password}}'; GRANT SELECT ON *.* TO '{{name}}'@'%';" \
+ default_ttl="1h" \
+ max_ttl="24h"
+ Success! Data written to: database/roles/wordpress-role
+```
+
+Демонстрация создания пользователя при обращении к API vault
+
+```console
+kubectl exec -it vault-0 -- vault read database/creds/wordpress-role
+Key                Value
+---                -----
+lease_id           database/creds/wordpress-role/4bTgwJOwfWC2v0Vta1nAqGK4
+lease_duration     1h
+lease_renewable    true
+password           vHu42NYUAlBPPIs-XKgM
+username           v-word-rqRI4YvfQ
+
+
+```
+
+Пользователь создался!
+
+Проверяем из под бизибокса.
+
+```console
+kubectl apply -n wordpress -f busybox.yml
+kubectl -n wordpress  exec -it bash -- bash
+apk update
+apk add curl jq mysql-client
+
+mysql -hwordpress-mysql -u'v-word-rqRI4YvfQ' -p'vHu42NYUAlBPPIs-XKgM'
+Welcome to the MariaDB monitor.  Commands end with ; or \g.
+Your MySQL connection id is 17
+Server version: 5.6.51 MySQL Community Server (GPL)
+
+Copyright (c) 2000, 2018, Oracle, MariaDB Corporation Ab and others.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+MySQL [(none)]> show databases;
++---------------------+
+| Database            |
++---------------------+
+| information_schema  |
+| #mysql50#lost+found |
+| mysql               |
+| performance_schema  |
+| wordpress           |
++---------------------+
+5 rows in set (0.001 sec)
+
+MySQL [(none)]> 
+```
+
+Отменить доступ можно командой:
+
+
+```console
+kubectl exec -it vault-0 -- vault lease revoke database/creds/wordpress-role/4bTgwJOwfWC2v0Vta1nAqGK4
+All revocation operations queued successfully!
+
+```
+
+Смотрим в бизибоксе:
+
+```console
+mysql -hwordpress-mysql -u'v-word-rqRI4YvfQ' -p'vHu42NYUAlBPPIs-XKgM'
+ERROR 1045 (28000): Access denied for user 'v-word-rqRI4YvfQ'@'10.20.3.14' (using password: YES)
+```
+
+Дальнейший путь это интегрировать куб с этим namespace wordpress и при курлении соответствующего  пути волта database/creds/wordpress-role/
+автоматически создать пользователя. Но в задании этого нет :)
+
+
+Интересеный ман и скрипты (TODO поиграть со скриптами):
+
+> https://medium.com/@jackalus/vault-kubernetes-auth-and-database-secrets-engine-6551d686a12
+
+> https://github.com/jacklei/vault-helpers
+
+</details>
+
+
+</details>
+
+
+<details>
 <summary> <b>ДЗ №9 - kubernetes-logging (Сервисы централизованного логирования для компонентов Kubernetes и приложений)</b></summary>
 
 - [x] Основное ДЗ
