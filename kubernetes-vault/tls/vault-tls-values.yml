@@ -1,0 +1,59 @@
+
+
+injector:
+  # True if you want to enable vault agent injection.
+  enabled: true
+
+  replicas: 3
+
+  leaderElector:
+    enabled: false
+
+  # Extra annotations to attach to the webhook
+  webhookAnnotations: 
+    cert-manager.io/inject-ca-from: default/injector-tls
+
+  certs:
+    secretName: injector-tls
+
+server:  
+  standalone:
+    enabled: false
+
+  extraEnvironmentVars:
+    VAULT_ADDR: https://localhost:8200
+    VAULT_CACERT: /vault/userconfig/vault-server-tls/vault.ca
+
+  extraVolumes:
+    - type: secret
+      name: vault-server-tls
+
+  ha:
+    enabled: true
+
+    config: |
+      ui = true
+      listener "tcp" {
+        tls_disable = 0
+        address = "[::]:8200"
+        cluster_address = "[::]:8201"
+        tls_cert_file = "/vault/userconfig/vault-server-tls/vault.crt"
+        tls_key_file  = "/vault/userconfig/vault-server-tls/vault.key"
+        tls_client_ca_file = "/vault/userconfig/vault-server-tls/vault.ca"
+      }
+      storage "consul" {
+        path = "vault"
+        address = "HOST_IP:8500"
+      }
+
+      service_registration "kubernetes" {}
+
+      seal "gcpckms" {
+         project     = "vault-helm-dev-246514"
+         region      = "global"
+         key_ring    = "vault-helm-unseal-kr"
+         crypto_key  = "vault-helm-unseal-key"
+      }
+
+ui:
+  enabled: true

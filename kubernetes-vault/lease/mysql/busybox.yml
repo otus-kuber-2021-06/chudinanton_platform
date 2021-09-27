@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bash
+  labels:
+    app: bash
+spec:
+  serviceAccountName: vault
+  containers:
+  - name: bash
+    image: bash
+    command: ["/bin/sh", "-ec", "sleep 3600"]
