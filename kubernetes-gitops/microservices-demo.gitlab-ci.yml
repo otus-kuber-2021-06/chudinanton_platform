@@ -1,0 +1,100 @@
+default:
+  image: docker:20.10.8
+  before_script:
+    - echo -n $DOCKER_REGISTRY_PASSWORD | docker login --username $DOCKER_REGISTRY_USER --password-stdin
+  after_script:
+    - docker logout
+
+services:
+  - docker:20.10.8-dind
+
+stages:
+  - build
+
+# BUILD & PUSH
+.build-push:
+    script:
+      - cd src/${service}
+      - docker build -t $DOCKER_REGISTRY_USER/${service}:$CI_COMMIT_TAG .
+      - docker push $DOCKER_REGISTRY_USER/${service}:$CI_COMMIT_TAG
+    only:
+      - tags
+
+build-adservice:
+  stage: build
+  extends: .build-push
+  variables:
+    service: adservice
+
+build-cartservice:
+  stage: build
+  script:
+    - cd src/${service}/src
+    - docker build -t $DOCKER_REGISTRY_USER/${service}:$CI_COMMIT_TAG .
+    - docker push $DOCKER_REGISTRY_USER/${service}:$CI_COMMIT_TAG
+  variables:
+    service: cartservice
+  needs: ["build-adservice"]
+
+build-checkoutservice:
+  stage: build
+  extends: .build-push
+  variables:
+    service: checkoutservice
+  needs: ["build-cartservice"]
+
+build-currencyservice:
+  stage: build
+  extends: .build-push
+  variables:
+    service: currencyservice
+  needs: ["build-checkoutservice"]
+
+build-emailservice:
+  stage: build
+  extends: .build-push
+  variables:
+    service: emailservice
+  needs: ["build-currencyservice"]
+
+build-frontend:
+  stage: build
+  extends: .build-push
+  variables:
+    service: frontend
+  needs: ["build-emailservice"]
+
+build-loadgenerator:
+  stage: build
+  extends: .build-push
+  variables:
+    service: loadgenerator
+  needs: ["build-frontend"]
+
+build-paymentservice:
+  stage: build
+  extends: .build-push
+  variables:
+    service: paymentservice
+  needs: ["build-loadgenerator"]
+
+build-productcatalogservice:
+  stage: build
+  extends: .build-push
+  variables:
+    service: productcatalogservice
+  needs: ["build-paymentservice"]
+
+build-recommendationservice:
+  stage: build
+  extends: .build-push
+  variables:
+    service: recommendationservice
+  needs: ["build-productcatalogservice"]
+
+build-shippingservice:
+  stage: build
+  extends: .build-push
+  variables:
+    service: shippingservice
+  needs: ["build-recommendationservice"]

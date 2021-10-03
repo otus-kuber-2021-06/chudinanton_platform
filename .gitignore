@@ -12,3 +12,5 @@ variables.json
 terraform/.terraform.tfstate.lock.info
 *.retry
 .terraform.lock.hcl
+credentials/*
+.terraform/*

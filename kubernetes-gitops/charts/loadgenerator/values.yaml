@@ -1,0 +1,5 @@
+image:
+  repository: chudinanton/loadgenerator
+  tag: latest
+ingress:
+  host: develop.kubernetes-platform-demo.express42.io
