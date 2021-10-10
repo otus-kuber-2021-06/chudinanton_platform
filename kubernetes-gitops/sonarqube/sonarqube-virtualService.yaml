@@ -1,0 +1,16 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: sonarqube
+  namespace: istio-system
+spec:
+  hosts:
+  - "sonarqube.yogatour.su"
+  gateways:
+  - sonarqube
+  http:
+  - route:
+    - destination:
+        host: sonarqube-sonarqube
+        port:
+          number: 9000

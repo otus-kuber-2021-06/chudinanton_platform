@@ -1,0 +1,7 @@
+ingress:
+  enabled: false
+
+plugins:
+  install:
+    - "https://binaries.sonarsource.com/Distribution/sonar-go-plugin/sonar-go-plugin-1.6.0.719.jar"
+    - "https://binaries.sonarsource.com/Distribution/sonar-python-plugin/sonar-python-plugin-2.3.0.5351.jar"
