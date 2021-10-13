@@ -1,0 +1,54 @@
+helmDefaults:
+  createNamespace: true
+  wait: true
+
+repositories:
+  - name: prometheus-community
+    url: https://prometheus-community.github.io/helm-charts 
+
+  - name: fluxcd
+    url: https://charts.fluxcd.io
+
+releases:
+  - name: prometheus
+    namespace: observability
+    chart: prometheus-community/kube-prometheus-stack
+    hooks:
+      - events: ["presync"]
+        showlogs: true
+        command: "/bin/sh"
+        args:
+        - "-c"
+        - >-
+          kubectl get namespace "{{`{{ .Release.Namespace }}`}}" >/dev/null 2>&1 || kubectl create namespace "{{`{{ .Release.Namespace }}`}}";
+    values:
+      - ./kube-prometheus-stack-values.yaml
+
+  - name: flux
+    namespace: flux
+    chart: fluxcd/flux
+    hooks:
+      - events: ["presync"]
+        showlogs: true
+        command: "/bin/sh"
+        args:
+        - "-c"
+        - >-
+          kubectl get namespace "{{`{{ .Release.Namespace }}`}}" >/dev/null 2>&1 || kubectl create namespace "{{`{{ .Release.Namespace }}`}}";
+    values:
+      - ./flux.values.yaml
+
+  - name: helm-operator
+    namespace: flux
+    chart: fluxcd/helm-operator
+    hooks:
+      - events: ["presync"]
+        showlogs: true
+        command: "/bin/sh"
+        args:
+        - "-c"
+        - >-
+          kubectl get namespace "{{`{{ .Release.Namespace }}`}}" >/dev/null 2>&1 || kubectl create namespace "{{`{{ .Release.Namespace }}`}}";
+    values:
+      - ./helm-operator.values.yaml
+

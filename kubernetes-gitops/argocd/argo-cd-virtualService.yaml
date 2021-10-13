@@ -1,0 +1,20 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  hosts:
+  - "argocd.yogatour.su"
+  gateways:
+  - argocd
+  tls:
+  - match:
+    - port: 443
+      sniHosts:
+      - argocd.yogatour.su
+    route:
+    - destination:
+        host: argocd-server
+        port:
+          number: 443

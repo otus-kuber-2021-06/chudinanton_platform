@@ -1,6 +1,2107 @@
 # chudinanton_platform
 chudinanton Platform repository
 <details>
+<summary> <b>ДЗ №11 - kubernetes-gitops (GitOps и инструменты поставки)</b></summary>
+
+- [x] Основное ДЗ
+
+- [x] Все дополнительные задания *
+
+<details>
+<summary> <b>Подготовка GitLab репозитория</b></summary>
+
+Переместил в проект microservices-demo код из GitHub репозитория (а также добавил SSH ключ)
+
+https://github.com/GoogleCloudPlatform/microservices-demo
+
+
+```console
+git clone https://github.com/GoogleCloudPlatform/microservices-demo
+cd microservices-demo
+git remote add gitlab git@gitlab.com:chudinanton108/microservices-demo.git
+git remote remove origin
+git push gitlab master
+```
+### Создание Helm чартов
+- Перед началом выполнения домашнего задания необходимо подготовить Helm чарты для каждого микросервиса. 
+- Можно воспользоваться наработками из предыдущих домашних заданий, либо скопировать готовые чарты из (директория deploy/charts )
+
+https://gitlab.com/express42/kubernetes-platform-demo/microservices-demo/
+
+
+- Во всех манифестах, описывающих deployment, обязательно должны быть параметризованы название образа и его тег. 
+- Рекомендуется придерживаться следующего формата:
+
+```yml
+image:
+  repository: frontend
+  tag: latest
+```
+Результат поместил в директорию deploy/charts . Получился следующий вывод:
+
+```console
+tree -L 1 deploy/charts
+deploy/charts
+├── adservice
+├── cartservice
+├── checkoutservice
+├── currencyservice
+├── emailservice
+├── frontend
+├── grafana-load-dashboards
+├── loadgenerator
+├── paymentservice
+├── productcatalogservice
+├── recommendationservice
+└── shippingservice
+
+```
+
+В каждом chart'е есть values.yaml 
+
+```yml
+image:
+  repository: avtandilko/adservice
+  tag: latest
+```
+
+</details>
+
+<details>
+<summary> <b>Автоматизированное развертывание kubernetes кластера + istio | Задание со ⭐ </b></summary>
+
+
+- Любым способом (вручную через web-интерфейс, консольным клиентом gcloud, утилитой Terraform) разверните managed Kubernetes кластер в GCP.
+- Понадобится как минимум 4 ноды типа n1-standard-2 . Остальные параметры можно оставить по умолчанию.
+- Самостоятельно реализуйте установку istio как GKE аддона
+
+
+Развернул инфру через Terraform.
+
+```console
+cd terraform
+terraform apply -auto-approve=true
+...
+cluster_name = "gcp-cluster-prod"
+cp ~/.kube/config ~/.kube/config.bak && export KUBECONFIG=~/.kube/config:~/.kube/conf.d/config-gcp-cluster-prod
+```
+
+Получился следующий кластер:
+
+```console
+kg nodes -o wide
+NAME                                              STATUS   ROLES    AGE    VERSION             INTERNAL-IP   EXTERNAL-IP      OS-IMAGE                             KERNEL-VERSION   CONTAINER-RUNTIME
+gke-gcp-cluster-prod-default-pool-0350232f-09b7   Ready    <none>   122m   v1.20.10-gke.1600   10.10.0.2     34.141.115.199   Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+gke-gcp-cluster-prod-default-pool-0350232f-8nrf   Ready    <none>   122m   v1.20.10-gke.1600   10.10.0.5     34.107.86.246    Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+gke-gcp-cluster-prod-default-pool-0350232f-kwql   Ready    <none>   122m   v1.20.10-gke.1600   10.10.0.4     35.242.222.132   Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+gke-gcp-cluster-prod-default-pool-0350232f-t9g8   Ready    <none>   122m   v1.20.10-gke.1600   10.10.0.3     34.141.59.249    Container-Optimized OS from Google   5.4.120+         docker://20.10.3
+```
+
+### Самостоятельно реализуйте установку istio как GKE аддона
+
+Впилим в Terraform разворот istio как GKE аддона
+
+```tf
+    istio_config {
+      disabled = var.istio
+      auth     = "AUTH_NONE"
+    }
+```
+
+Пришлось переписать все на другой модуль (с большим количеством звезд в github) в котором есть поддержка istio.
+
+Модуль:
+
+https://registry.terraform.io/providers/hashicorp/google/latest/docs
+
+https://registry.terraform.io/modules/terraform-google-modules/gcloud/google/latest
+
+https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/container_cluster#istio_config
+
+https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/container_node_pool
+
+
+Другая дока:
+
+https://itsmetommy.com/2019/07/15/kubernetes-create-gke-cluster-with-terraform/
+
+
+Дока по бакету и хранению в ней state файла. Если выбираем в качестве хранилки GCP
+
+https://pbhadani.com/posts/first-gcp-resource-with-terraform/
+
+
+Официальная дока gitlab:
+
+https://docs.gitlab.com/ee/user/infrastructure/iac/
+
+https://gitlab.com/gitlab-org/configure/examples/gitlab-terraform-aws/-/blob/master/.gitlab-ci.yml
+
+https://gitlab.com/gitops-demo/infra
+
+Дока по хранению state в gitlab:
+
+https://docs.gitlab.com/ee/user/infrastructure/iac/terraform_state.html
+
+
+Обернул VPC и GKECLUSTER в модуль и сделал два окружения. Рабочее пока prod. Все максимально параметризовано на будущее.
+
+
+Адрес с инфра репой:
+
+https://gitlab.com/i441/gcp-infra
+
+Успешно созданный кластер:
+
+https://gitlab.com/i441/gcp-infra/-/jobs/1638873484
+
+Все state, lock и .terraform файлы помещены в backend Gitlab'а.
+
+Руками создается так (но мы используем CI):
+
+https://gitlab.com/gitlab-org/configure/examples/gitlab-terraform-aws/-/blob/master/init.sh
+
+Можно и дальше украшать ci, есть куда стремиться :) Но думаю пока достаточно.
+
+https://gitlab.com/gitops-demo/infra/templates/-/blob/master/terraform.gitlab-ci.yml
+
+```console
+kg svc -A
+NAMESPACE        NAME                     TYPE           CLUSTER-IP       EXTERNAL-IP      PORT(S)                                                                                                                                      AGE
+default          kubernetes               ClusterIP      10.103.240.1     <none>           443/TCP                                                                                                                                      47h
+istio-operator   istio-operator           ClusterIP      10.103.240.247   <none>           8383/TCP                                                                                                                                     47h
+istio-system     istio-citadel            ClusterIP      10.103.252.251   <none>           8060/TCP,15014/TCP                                                                                                                           47h
+istio-system     istio-galley             ClusterIP      10.103.242.215   <none>           443/TCP,15014/TCP,9901/TCP                                                                                                                   47h
+istio-system     istio-ingressgateway     LoadBalancer   10.103.249.77    34.141.115.199   15020:31003/TCP,80:30947/TCP,443:31468/TCP,31400:31315/TCP,15029:32301/TCP,15030:30103/TCP,15031:31262/TCP,15032:32726/TCP,15443:32271/TCP   47h
+istio-system     istio-pilot              ClusterIP      10.103.254.232   <none>           15010/TCP,15011/TCP,8080/TCP,15014/TCP                                                                                                       47h
+istio-system     istio-policy             ClusterIP      10.103.255.140   <none>           9091/TCP,15004/TCP,15014/TCP                                                                                                                 47h
+istio-system     istio-sidecar-injector   ClusterIP      10.103.249.75    <none>           443/TCP,15014/TCP                                                                                                                            47h
+istio-system     istio-telemetry          ClusterIP      10.103.252.53    <none>           9091/TCP,15004/TCP,15014/TCP,42422/TCP                                                                                                       47h
+istio-system     istiod-istio-1611        ClusterIP      10.103.250.81    <none>           15010/TCP,15012/TCP,443/TCP,15014/TCP,853/TCP                                                                                                47h
+istio-system     prometheus               ClusterIP      10.103.242.130   <none>           9090/TCP                                                                                                                                     47h
+istio-system     promsd                   ClusterIP      10.103.252.160   <none>           9090/TCP                                                                                                                                     47h
+kube-system      calico-typha             ClusterIP      10.103.240.169   <none>           5473/TCP                                                                                                                                     47h
+kube-system      default-http-backend     NodePort       10.103.246.129   <none>           80:32527/TCP                                                                                                                                 47h
+kube-system      kube-dns                 ClusterIP      10.103.240.10    <none>           53/UDP,53/TCP                                                                                                                                47h
+kube-system      metrics-server           ClusterIP      10.103.252.76    <none>           443/TCP
+```
+
+### TODO:
+- taints
+- 3-4 пула с нодами с разными taints, пулы должны создаваться при условии наличия соответствующих переменных, описывающих пул.
+- Отдельная машина под gitlab.
+- Отдельная машина под elastic.
+- описать три окружения и адаптировать CI на работу в трех ветках.
+
+</details>
+
+
+<details>
+<summary> <b>Continuous Integration</b></summary>
+
+- Соберите Docker образы для всех микросервиса и поместите данные образы в Docker Hub
+- При тегировании образов используйте подход 
+
+https://semver.org/
+
+- Например, первому собранному образу логично выставить тег v0.0.1
+- После выполнения данного шага в Docker Hub должно находиться как минимум по одному образу для каждого микросервиса
+
+Для массовой локальной сборки удобно использовать make file
+
+Нужно два простых шага: сборка и публикация.
+
+https://habr.com/ru/post/263083/
+
+https://ealebed.github.io/posts/2017/%D0%B8%D1%81%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5-make-%D0%B4%D0%BB%D1%8F-%D1%83%D0%BF%D1%80%D0%B0%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F-docker-%D0%BA%D0%BE%D0%BD%D1%82%D0%B5%D0%B9%D0%BD%D0%B5%D1%80%D0%B0%D0%BC%D0%B8/
+
+
+```sh
+username=chudinanton
+tag=v0.0.1
+
+build: build_adservice build_cartservice build_checkoutservice build_currencyservice build_emailservice build_frontend build_loadgenerator build_paymentservice build_productcatalogservice build_recommendationservice build_shippingservice 
+
+build_adservice:
+	export USER_NAME=$(username) && cd microservices-demo/src/adservice && docker build -t $(username)/adservice:$(tag) .
+
+build_cartservice:
+	export USER_NAME=$(username) && cd microservices-demo/src/cartservice && docker build -t $(username)/cartservice:$(tag) .
+
+build_checkoutservice:
+	export USER_NAME=$(username) && cd microservices-demo/src/checkoutservice && docker build -t $(username)/checkoutservice:$(tag) .
+
+build_currencyservice:
+	export USER_NAME=$(username) && cd microservices-demo/src/currencyservice && docker build -t $(username)/currencyservice:$(tag) .
+
+build_emailservice:
+	export USER_NAME=$(username) && cd microservices-demo/src/emailservice && docker build -t $(username)/emailservice:$(tag) .
+
+build_frontend:
+	export USER_NAME=$(username) && cd microservices-demo/src/frontend && docker build -t $(username)/frontend:$(tag) .
+
+build_loadgenerator:
+	export USER_NAME=$(username) && cd microservices-demo/src/loadgenerator && docker build -t $(username)/loadgenerator:$(tag) .
+
+build_paymentservice:
+	export USER_NAME=$(username) && cd microservices-demo/src/paymentservice && docker build -t $(username)/paymentservice:$(tag) .
+
+build_productcatalogservice:
+	export USER_NAME=$(username) && cd microservices-demo/src/productcatalogservice && docker build -t $(username)/productcatalogservice:$(tag) .
+
+build_recommendationservice:
+	export USER_NAME=$(username) && cd microservices-demo/src/recommendationservice && docker build -t $(username)/recommendationservice:$(tag) .
+
+build_shippingservice:
+	export USER_NAME=$(username) && cd microservices-demo/src/shippingservice && docker build -t $(username)/shippingservice:$(tag) .
+
+release: release_adservice release_cartservice release_checkoutservice release_currencyservice release_emailservice release_frontend release_loadgenerator release_paymentservice release_productcatalogservice release_recommendationservice release_shippingservice
+
+release_adservice:
+	docker push $(username)/adservice:$(tag)
+
+release_cartservice:
+	docker push $(username)/cartservice:$(tag)
+
+release_checkoutservice:
+	docker push $(username)/checkoutservice:$(tag)
+
+release_currencyservice:
+	docker push $(username)/currencyservice:$(tag)
+
+release_emailservice:
+	docker push $(username)/emailservice:$(tag)
+
+release_frontend:
+	docker push $(username)/frontend:$(tag)
+
+release_loadgenerator:
+	docker push $(username)/loadgenerator:$(tag)
+
+release_paymentservice:
+	docker push $(username)/paymentservice:$(tag)
+
+release_productcatalogservice:
+	docker push $(username)/productcatalogservice:$(tag)
+
+release_recommendationservice:
+	docker push $(username)/recommendationservice:$(tag)
+
+release_shippingservice:
+	docker push $(username)/shippingservice:$(tag)
+
+.PHONY: build release
+```
+
+src/cartservice почему-то запихали исходники в подпапку src. Вынес все оттуда.
+
+Выполняем:
+
+```sh
+make - собираем
+make release - пушим
+
+docker images | grep v0.0.1
+chudinanton/shippingservice         v0.0.1               89ae59fb4030   4 minutes ago    32.6MB
+chudinanton/recommendationservice   v0.0.1               ff889f35c15e   4 minutes ago    397MB
+chudinanton/productcatalogservice   v0.0.1               7e64bca78b91   5 minutes ago    32.6MB
+chudinanton/paymentservice          v0.0.1               330fcfbccb68   5 minutes ago    172MB
+chudinanton/loadgenerator           v0.0.1               ed5498391310   5 minutes ago    165MB
+chudinanton/frontend                v0.0.1               0a6c64b11b46   6 minutes ago    35.2MB
+chudinanton/emailservice            v0.0.1               221aa1c29baa   6 minutes ago    215MB
+chudinanton/currencyservice         v0.0.1               f25d2c624e36   7 minutes ago    177MB
+chudinanton/checkoutservice         v0.0.1               458594ea383a   7 minutes ago    32.5MB
+chudinanton/cartservice             v0.0.1               ff0522b1af04   8 minutes ago    50.5MB
+chudinanton/adservice               v0.0.1               e30521dc9300   13 minutes ago   364MB
+```
+</details>
+
+<details>
+<summary> <b>Continuous Integration | Задание со ⭐ </b></summary>
+
+- Подготовьте pipeline, который будет содержать следующие стадии:
+> Сборку Docker образа для каждого из микросервисов
+
+> Push данного образа в Docker Hub
+
+- В качестве тега образа используйте tag коммита, инициирующего сборку (переменная CI_COMMIT_TAG в GitLab CI)
+- После выполнения данного шага в Docker Hub должно находиться как минимум по одному образу для каждого микросервиса
+
+### Выполняем:
+
+В репозитории microservices-demo создаем CI файл .gitlab-ci.yml выполняющий вышеуказанные действия. Для красоты и сжатия файла будем использовать .extends, которые впиливают в неш yml нужные template.
+
+Описываем образ в которым будут формироваться наши поделки и через befor_script авторизовываемся во внешнем репозитории:
+
+```yml
+default:
+  image: docker:20.10.8
+  before_script:
+    - echo -n $DOCKER_REGISTRY_PASSWORD | docker login --username $DOCKER_REGISTRY_USER --password-stdin
+  after_script:
+    - docker logout
+
+```
+
+Креды будут в переменных gitlab, негоже хранить в коде (не забываем поставить MASK для variable дыбы не светить креды в pipeline).
+
+- $DOCKER_REGISTRY_USER 
+- $DOCKER_REGISTRY_PASSWORD
+
+Чтобы побороть "Cannot perform an interactive login from a non TTY device" и прочие проблемы связанные с авторизацией нужно обратить внимание на то не стоит ли защита переменной.
+
+https://docs.gitlab.com/ee/ci/variables/index.html
+
+В условии задания у нас должно быть две стадии сборка и push. Поскольку сервисов у нас много загоняем однотипные операции в extends:
+
+```yml
+# BUILD & PUSH
+.build-push:
+    script:
+      - cd src/${service}
+      - docker build -t $DOCKER_REGISTRY_USER/${service}:$CI_COMMIT_TAG .
+      - docker push $DOCKER_REGISTRY_USER/${service}:$CI_COMMIT_TAG
+    only:
+      - tags
+```
+
+- Имя сервиса (оно же название папки) берем из ${service} переменной, которую определяем в шаге сборки и пуша.
+- Не забываем про $CI_COMMIT_TAG - tag коммита, инициирующего сборку, поэтому используем конструкцию вида
+
+```yml
+   only:
+      - tags
+```
+
+Это нужно для того, чтобы сборка и пуш инициировалась только при проставлении тега в коммите. Хорошо бы еще задать шаблон, но в условии задания этого нет.
+
+Теперь можно начинать сборку (пример сборки и пуша):
+
+```yml
+build-checkoutservice:
+  stage: build
+  extends: .build-push
+  variables:
+    service: checkoutservice
+  needs: ["build-cartservice"]
+```
+
+Сделаем дополнительно условие needs: ["build-cartservice"] дабы сборка запускалась поэтапно, а не все сразу.
+
+Получается в итоге размашисто, но благодаря "extends:" код ужимается и становится более-менее читабельным.
+
+Проверяем на одном сервисе используя тегирования коммита:
+
+```console
+git commit -m "prepare for v.0.0.2 release"
+git tag v.0.0.2
+git push --tags
+```
+
+или так:
+
+```console
+
+git commit -m "prepare for v.0.0.2 release" && git tag v.0.0.2 && git push --tags
+
+```
+
+Удаление метки:
+
+```console
+git tag -d v.0.0.2
+```
+
+Финальные ci file поместил в kubernetes-gitops/microservices-demo.gitlab-ci.yml
+
+Фото выполненного pipelene:
+
+![pipilene_success](kubernetes-gitops/images/pipilene_success.png)
+
+Успешно пройденный pipeline:
+
+https://gitlab.com/chudinanton108/microservices-demo/-/pipelines/381380224/builds
+
+
+
+</details>
+
+<details>
+<summary> <b>GitOps - Flux</b></summary>
+
+- Добавим официальный репозиторий Flux:
+
+```console
+helm repo add fluxcd https://charts.fluxcd.io
+
+```
+
+- Произведем установку Flux в кластер, в namespace flux 
+- Используйте values из следующего (не забудьте изменить название git-репозитория)
+
+https://github.com/express42/otus-platform-snippets/blob/master/Module-02/GitOps/flux.values.yaml
+
+
+```console
+helm upgrade --install flux fluxcd/flux -f flux.values.yaml --namespace flux --create-namespace
+Release "flux" does not exist. Installing it now.
+NAME: flux
+LAST DEPLOYED: Sat Oct  2 20:45:46 2021
+NAMESPACE: flux
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+Get the Git deploy key by either (a) running
+
+  kubectl -n flux logs deployment/flux | grep identity.pub | cut -d '"' -f2
+
+or by (b) installing fluxctl through
+https://fluxcd.io/legacy/flux/references/fluxctl/#installing-fluxctl
+and running:
+
+  fluxctl identity --k8s-fwd-ns flux
+
+```
+
+
+- Установим Helm operator:
+
+```console
+helm upgrade --install helm-operator fluxcd/helm-operator -f helm-operator.values.yaml --namespace flux
+Release "helm-operator" does not exist. Installing it now.
+NAME: helm-operator
+LAST DEPLOYED: Sat Oct  2 20:48:55 2021
+NAMESPACE: flux
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+Flux Helm Operator docs https://fluxcd.io/legacy/helm-operator
+
+Example:
+
+AUTH_VALUES=$(cat <<-END
+usePassword: true
+password: "redis_pass"
+usePasswordFile: true
+END
+)
+
+kubectl create secret generic redis-auth --from-literal=values.yaml="$AUTH_VALUES"
+
+cat <<EOF | kubectl apply -f -
+apiVersion: helm.fluxcd.io/v1
+kind: HelmRelease
+metadata:
+  name: redis
+  namespace: default
+spec:
+  releaseName: redis
+  chart:
+    repository: https://kubernetes-charts.storage.googleapis.com
+    name: redis
+    version: 10.5.7
+  valuesFrom:
+  - secretKeyRef:
+      name: redis-auth
+  values:
+    master:
+      persistence:
+        enabled: false
+    volumePermissions:
+      enabled: true
+    metrics:
+      enabled: true
+    cluster:
+      enabled: false
+EOF
+
+watch kubectl get hr
+```
+
+Я в итоге развернул CRD через helm добавив соответствующий values.
+
+- Установим fluxctl на локальную машину для управления нашим CD инструментом. Руководство по установке доступно по ссылке:
+
+> https://docs.fluxcd.io/en/stable/references/fluxctl.html
+
+
+```console
+brew install fluxctl
+export FLUX_FORWARD_NAMESPACE=flux
+
+```
+
+- Наконец, добавим в свой профиль GitLab публичный ssh-ключ, при помощи которого flux получит доступ к нашему git-репозиторию.
+- Получить значение ключа можно следующей командой:
+
+
+```console
+fluxctl identity --k8s-fwd-ns flux
+```
+
+## Проверка:
+
+Пришло время проверить корректность работы Flux. Как мы уже знаем, Flux умеет автоматически синхронизировать состояние кластера и репозитория. Это касается не только сущностей HelmRelease , которыми мы будем оперировать для развертывания приложения, но и обыкновенных манифестов. 
+
+Поместим манифест, описывающий namespace microservices-demo в директорию deploy/namespaces и сделаем push в GitLab:
+
+```console
+git push
+```
+
+> У меня была проблема, связанная с наличием двух веток: main и master. Flux'у нужно было явно ее указать.
+
+```console
+kubectl logs flux-6dff99cddb-gwh99 -n flux | grep "kubectl apply -f"
+ts=2021-10-02T21:35:30.823138314Z caller=sync.go:608 method=Sync cmd="kubectl apply -f -" took=674.145264ms err=null output="namespace/microservices-demo created"
+kubectl get ns
+NAME                 STATUS   AGE
+default              Active   2d3h
+flux                 Active   132m
+istio-operator       Active   2d3h
+istio-system         Active   2d3h
+kube-node-lease      Active   2d3h
+kube-public          Active   2d3h
+kube-system          Active   2d3h
+microservices-demo   Active   57s
+```
+
+### HelmRelease
+
+- Мы подобрались к сущностям, которыми управляет helm-operator - HelmRelease. Для описания сущностей такого вида создадим отдельную директорию
+deploy/releases и поместим туда файл frontend.yaml с описанием конфигурации релиза.
+
+Пояснения к HelmRelease
+
+- Аннотация разрешает автоматическое обновление релиза в Kubernetes кластере в случае изменения версии Docker образа в Registry
+- Указываем Flux следить за обновлениями конкретных Docker образов в Registry.
+- Новыми считаются только образы, имеющие версию выше текущей и отвечающие маске семантического версионирования ~0.0 (например,0.0.1, 0.0.72, но не 1.0.0)
+
+- Helm chart, используемый для развертывания релиза. В нашем случае указываем git-репозиторий, и директорию с чартом внутри него 
+- Переопределяем переменные Helm chart. В дальнейшем Flux может сам переписывать эти значения и делать commit в git-репозиторий (например, изменять тег Docker образа при его обновлении в Registry). Более подробное описание доступно по ссылке:
+
+https://fluxcd.io/legacy/flux/references/helm-operator-integration/
+
+```yml
+---
+apiVersion: helm.fluxcd.io/v1
+kind: HelmRelease
+metadata:
+  name: frontend
+  namespace: microservices-demo
+  annotations:
+    fluxcd.io/ignore: "false"
+    fluxcd.io/automated: "true"
+    flux.weave.works/tag.chart-image: semver:~0.0
+spec:
+  releaseName: frontend
+  helmVersion: v3
+  chart:
+    git: git@gitlab.com:chudinanton108/microservices-demo.git
+    ref: main
+    path: deploy/charts/frontend
+  values:
+    image:
+      repository: chudinanton/frontend
+      tag: v0.0.1
+```
+
+Сделаем Push в репозиторий git@gitlab.com:chudinanton108/microservices-demo.git
+
+Модифицировал CI файл добавив в except flux-sync, а вообще надо бы сделать regex (сделаю дальше):
+
+```yml
+    except: 
+      refs:
+        - flux-sync
+```
+
+В логах helm-operator видим
+
+```console
+  Warning  FailedReleaseSync  58s (x55 over 28m)  helm-operator  synchronization of release 'frontend' in namespace 'microservices-demo' failed: installation failed: unable to build kubernetes objects from release manifest: unable to recognize "": no matches for kind "ServiceMonitor" in version "monitoring.coreos.com/v1"
+```
+
+Нужно сделать "ServiceMonitor" in version "monitoring.coreos.com/v1". Поставим prometheus, он нам пригодится.
+
+
+```console
+kubectl create ns observability
+helm upgrade --install prometheus prometheus-community/kube-prometheus-stack -n observability -f kube-prometheus-stack/values.yaml
+```
+
+Смотрим на наш helmrelease
+
+```console
+kubectl get helmrelease -n microservices-demo
+NAME       RELEASE    PHASE       RELEASESTATUS   MESSAGE                                                                       AGE
+frontend   frontend   Succeeded   deployed        Release was successful for Helm release 'frontend' in 'microservices-demo'.   46m
+```
+
+По статусу мы можем понять, что релиз применился успешно, и frontend запущен. Дополнительно проверим это:
+
+```console
+helm list -n microservices-demo
+NAME            NAMESPACE               REVISION        UPDATED                                 STATUS          CHART           APP VERSION
+frontend        microservices-demo      1               2021-10-03 10:03:40.873208791 +0000 UTC deployed        frontend-0.21.0 1.16.0
+```
+
+Командой <b>fluxctl --k8s-fwd-ns flux sync</b> можно инициировать синхронизацию вручную
+
+
+### Обновление образа
+- Внесем изменения в исходный код микросервиса frontend (не имеет значения, какие) и пересоберем образ, при этом инкрементировав версию тега (до v0.0.3)
+- Дождемся автоматического обновления релиза в Kubernetes кластере (для просмотра ревизий релиза можно использовать команду helm history frontend -n microservices-demo )
+- Проверим, изменилось ли что-либо в git-репозитории (в частности, в файле deploy/releases/frontend.yaml )
+
+
+```console
+git commit -m "prepare for v.0.0.3 release" && git tag v.0.0.3 && git push --tags
+helm history frontend -n microservices-demo
+REVISION        UPDATED                         STATUS          CHART           APP VERSION     DESCRIPTION     
+1               Sun Oct  3 10:03:40 2021        superseded      frontend-0.21.0 1.16.0          Install complete
+2               Sun Oct  3 11:38:09 2021        superseded      frontend-0.21.0 1.16.0          Upgrade complete
+3               Sun Oct  3 11:42:02 2021        deployed        frontend-0.21.0 1.16.0          Upgrade complete
+(gcp-cluster-prod # ) antonchudin@mir ~/otus/k8s_06/chudinanton_platform/kubernetes-gitops/microservices-demo# helm list -n microservices-demo 
+NAME            NAMESPACE               REVISION        UPDATED                                 STATUS          CHART           APP VERSION
+frontend        microservices-demo      3               2021-10-03 11:42:02.868751728 +0000 UTC deployed        frontend-0.21.0 1.16.0 
+```
+
+При обнаружении в докер хабе нового релиза с тегом соответствующему шаблону происходит авторелиз и изменение в соответствующем release:
+
+![flux_success](kubernetes-gitops/images/flux_success.png)
+
+
+### Обновление Helm chart
+- Попробуем внести изменения в Helm chart frontend и поменять имя deployment на frontend-hipster
+- Сделаем push измененного Helm chart в GitLab и понаблюдаем за процессом
+
+```console
+kubectl logs helm-operator-674fdbf5c9-d8l9d -n flux | grep Deployment                           master 
+ts=2021-10-03T13:38:16.743888841Z caller=helm.go:69 component=helm version=v3 info="Created a new Deployment called \"frontend-hipster\" in microservices-demo\n" targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:42:16.803314157Z caller=helm.go:69 component=helm version=v3 info="Created a new Deployment called \"frontend\" in microservices-demo\n" targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:45:21.250267668Z caller=helm.go:69 component=helm version=v3 info="Created a new Deployment called \"frontend-hipster\" in microservices-demo\n" targetNamespace=microservices-demo release=frontend
+```
+
+```console
+ts=2021-10-03T13:45:20.053714469Z caller=release.go:79 component=release release=frontend targetNamespace=microservices-demo resource=microservices-demo:helmrelease/frontend helmVersion=v3 info="starting sync run"
+ts=2021-10-03T13:45:20.366228229Z caller=release.go:353 component=release release=frontend targetNamespace=microservices-demo resource=microservices-demo:helmrelease/frontend helmVersion=v3 info="running upgrade" action=upgrade
+ts=2021-10-03T13:45:20.418481891Z caller=helm.go:69 component=helm version=v3 info="preparing upgrade for frontend" targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:45:20.427423251Z caller=helm.go:69 component=helm version=v3 info="resetting values to the chart's original version" targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:45:21.139417659Z caller=helm.go:69 component=helm version=v3 info="performing update for frontend" targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:45:21.16742915Z caller=helm.go:69 component=helm version=v3 info="creating upgraded release for frontend" targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:45:21.192483545Z caller=helm.go:69 component=helm version=v3 info="checking 5 resources for changes" targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:45:21.206558474Z caller=helm.go:69 component=helm version=v3 info="Looks like there are no changes for Service \"frontend\"" targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:45:21.250267668Z caller=helm.go:69 component=helm version=v3 info="Created a new Deployment called \"frontend-hipster\" in microservices-demo\n" targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:45:21.369967771Z caller=helm.go:69 component=helm version=v3 info="Deleting \"frontend\" in microservices-demo..." targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:45:21.424450923Z caller=helm.go:69 component=helm version=v3 info="updating status for upgraded release for frontend" targetNamespace=microservices-demo release=frontend
+ts=2021-10-03T13:45:21.513414946Z caller=release.go:364 component=release release=frontend targetNamespace=microservices-demo resource=microservices-demo:helmrelease/frontend helmVersion=v3 info="upgrade succeeded" revision=8a76c106d1c147a4c71ace78bd0d3949a108830b phase=upgrade
+```
+
+Поиграл несколько раз.
+
+</details>
+
+<details>
+<summary> <b>GitOps - Самостоятельное задание</b></summary>
+
+- Добавил манифесты HelmRelease для всех микросервисов входящих в состав HipsterShop
+- Проверил, что все микросервисы успешно развернулись в Kubernetes кластере
+
+Также добавил загрузку grafana-load-dashboards из отусовской репы.
+
+```console
+kg all -n microservices-demo -o wide
+NAME                                         READY   STATUS     RESTARTS   AGE     IP            NODE                                              NOMINATED NODE   READINESS GATES
+pod/adservice-76b5db9769-5l9g6               1/1     Running    0          2m5s    10.100.6.9    gke-gke-cluster-prod-default-pool-158ddb7f-ntqt   <none>           <none>
+pod/checkoutservice-698c6fcbc-j7s82          1/1     Running    0          2m5s    10.100.5.23   gke-gke-cluster-prod-default-pool-158ddb7f-6x9n   <none>           <none>
+pod/currencyservice-848cb8f97f-8qj95         1/1     Running    0          2m5s    10.100.5.24   gke-gke-cluster-prod-default-pool-158ddb7f-6x9n   <none>           <none>
+pod/emailservice-76c5db5b87-nvxqw            1/1     Running    0          2m30s   10.100.7.11   gke-gke-cluster-prod-default-pool-158ddb7f-7sn4   <none>           <none>
+pod/frontend-7b6f9695fb-sxptm                1/1     Running    0          3m43s   10.100.0.49   gke-gke-cluster-prod-default-pool-158ddb7f-nfqr   <none>           <none>
+pod/loadgenerator-6cbb766f8c-68bvg           0/1     Init:0/1   0          2m4s    10.100.0.52   gke-gke-cluster-prod-default-pool-158ddb7f-nfqr   <none>           <none>
+pod/loadgenerator-7466c77bd5-wwc7v           0/1     Init:0/1   0          3m31s   10.100.5.18   gke-gke-cluster-prod-default-pool-158ddb7f-6x9n   <none>           <none>
+pod/paymentservice-5b56bb9999-k7pqt          1/1     Running    0          2m3s    10.100.7.13   gke-gke-cluster-prod-default-pool-158ddb7f-7sn4   <none>           <none>
+pod/productcatalogservice-756b669fbc-7xh6g   1/1     Running    0          2m      10.100.7.14   gke-gke-cluster-prod-default-pool-158ddb7f-7sn4   <none>           <none>
+pod/recommendationservice-ff68c4589-k8wc2    1/1     Running    0          2m18s   10.100.7.12   gke-gke-cluster-prod-default-pool-158ddb7f-7sn4   <none>           <none>
+pod/shippingservice-74f85bb867-fhc42         1/1     Running    0          2m30s   10.100.0.51   gke-gke-cluster-prod-default-pool-158ddb7f-nfqr   <none>           <none>
+
+NAME                            TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)     AGE     SELECTOR
+service/adservice               ClusterIP   10.103.249.249   <none>        9555/TCP    3m36s   app=adservice
+service/checkoutservice         ClusterIP   10.103.255.208   <none>        5050/TCP    3m36s   app=checkoutservice
+service/currencyservice         ClusterIP   10.103.249.226   <none>        7000/TCP    3m36s   app=currencyservice
+service/emailservice            ClusterIP   10.103.255.89    <none>        5000/TCP    3m35s   app=emailservice
+service/frontend                ClusterIP   10.103.240.245   <none>        80/TCP      4h15m   app=frontend
+service/paymentservice          ClusterIP   10.103.245.228   <none>        50051/TCP   3m28s   app=paymentservice
+service/productcatalogservice   ClusterIP   10.103.243.204   <none>        3550/TCP    3m27s   app=productcatalogservice
+service/recommendationservice   ClusterIP   10.103.247.206   <none>        8080/TCP    3m23s   app=recommendationservice
+service/shippingservice         ClusterIP   10.103.248.139   <none>        50051/TCP   3m19s   app=shippingservice
+
+NAME                                    READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES                                     SELECTOR
+deployment.apps/adservice               1/1     1            1           3m37s   server       chudinanton/adservice:v0.0.1               app=adservice
+deployment.apps/checkoutservice         1/1     1            1           3m37s   server       chudinanton/checkoutservice:v0.0.1         app=checkoutservice
+deployment.apps/currencyservice         1/1     1            1           3m37s   server       chudinanton/currencyservice:v0.0.1         app=currencyservice
+deployment.apps/emailservice            1/1     1            1           3m36s   server       chudinanton/emailservice:v0.0.1            app=emailservice
+deployment.apps/frontend                1/1     1            1           3m44s   server       chudinanton/frontend:v0.0.5                app=frontend
+deployment.apps/loadgenerator           0/1     1            0           3m32s   main         chudinanton/loadgenerator:v0.0.1           app=loadgenerator
+deployment.apps/paymentservice          1/1     1            1           3m29s   server       chudinanton/paymentservice:v0.0.1          app=paymentservice
+deployment.apps/productcatalogservice   1/1     1            1           3m28s   server       chudinanton/productcatalogservice:v0.0.1   app=productcatalogservice
+deployment.apps/recommendationservice   1/1     1            1           3m24s   server       chudinanton/recommendationservice:v0.0.1   app=recommendationservice
+deployment.apps/shippingservice         1/1     1            1           3m20s   server       chudinanton/shippingservice:v0.0.1         app=shippingservice
+
+NAME                                               DESIRED   CURRENT   READY   AGE     CONTAINERS   IMAGES                                     SELECTOR
+replicaset.apps/adservice-6df66c7dcf               0         0         0       3m37s   server       chudinanton/adservice:0.0.1                app=adservice,pod-template-hash=6df66c7dcf
+replicaset.apps/adservice-76b5db9769               1         1         1       2m6s    server       chudinanton/adservice:v0.0.1               app=adservice,pod-template-hash=76b5db9769
+replicaset.apps/checkoutservice-698c6fcbc          1         1         1       2m6s    server       chudinanton/checkoutservice:v0.0.1         app=checkoutservice,pod-template-hash=698c6fcbc
+replicaset.apps/checkoutservice-fc995477c          0         0         0       3m37s   server       chudinanton/checkoutservice:0.0.1          app=checkoutservice,pod-template-hash=fc995477c
+replicaset.apps/currencyservice-769d5fd7f7         0         0         0       3m36s   server       chudinanton/currencyservice:0.0.1          app=currencyservice,pod-template-hash=769d5fd7f7
+replicaset.apps/currencyservice-848cb8f97f         1         1         1       2m6s    server       chudinanton/currencyservice:v0.0.1         app=currencyservice,pod-template-hash=848cb8f97f
+replicaset.apps/emailservice-6bf7d7fdb9            0         0         0       3m36s   server       chudinanton/emailservice:0.0.1             app=emailservice,pod-template-hash=6bf7d7fdb9
+replicaset.apps/emailservice-76c5db5b87            1         1         1       2m31s   server       chudinanton/emailservice:v0.0.1            app=emailservice,pod-template-hash=76c5db5b87
+replicaset.apps/frontend-7b6f9695fb                1         1         1       3m44s   server       chudinanton/frontend:v0.0.5                app=frontend,pod-template-hash=7b6f9695fb
+replicaset.apps/loadgenerator-6cbb766f8c           1         1         0       2m6s    main         chudinanton/loadgenerator:v0.0.1           app=loadgenerator,pod-template-hash=6cbb766f8c
+replicaset.apps/loadgenerator-7466c77bd5           1         1         0       3m32s   main         chudinanton/loadgenerator:0.0.1            app=loadgenerator,pod-template-hash=7466c77bd5
+replicaset.apps/paymentservice-5b56bb9999          1         1         1       2m4s    server       chudinanton/paymentservice:v0.0.1          app=paymentservice,pod-template-hash=5b56bb9999
+replicaset.apps/paymentservice-7d9d88d66f          0         0         0       3m29s   server       chudinanton/paymentservice:0.0.1           app=paymentservice,pod-template-hash=7d9d88d66f
+replicaset.apps/productcatalogservice-5cd87856c7   0         0         0       3m28s   server       chudinanton/productcatalogservice:0.0.1    app=productcatalogservice,pod-template-hash=5cd87856c7
+replicaset.apps/productcatalogservice-756b669fbc   1         1         1       2m1s    server       chudinanton/productcatalogservice:v0.0.1   app=productcatalogservice,pod-template-hash=756b669fbc
+replicaset.apps/recommendationservice-74cdf94c9    0         0         0       3m24s   server       chudinanton/recommendationservice:0.0.1    app=recommendationservice,pod-template-hash=74cdf94c9
+replicaset.apps/recommendationservice-ff68c4589    1         1         1       2m19s   server       chudinanton/recommendationservice:v0.0.1   app=recommendationservice,pod-template-hash=ff68c4589
+replicaset.apps/shippingservice-6bf76c9d49         0         0         0       3m20s   server       chudinanton/shippingservice:0.0.1          app=shippingservice,pod-template-hash=6bf76c9d49
+replicaset.apps/shippingservice-74f85bb867         1         1         1       2m31s   server       chudinanton/shippingservice:v0.0.1         app=shippingservice,pod-template-hash=74f85bb867
+```
+
+Развернулось все кроме loadgenerator
+
+Видимо wait-frontend: FRONTEND_ADDR: develop.kubernetes-platform-demo.express42.io:80
+
+Нужно предоставить внешний доступ. Сделал через helmfile. ingress + cert-manager
+
+Также починил cartservice удалив зависимость. Для теста пойдет.
+
+![Online_Boutique_success](kubernetes-gitops/images/Online_Boutique_success.png)
+
+</details>
+<details>
+<summary> <b>Полезные команды fluxctl</b></summary>
+
+- export FLUX_FORWARD_NAMESPACE=flux переменная окружения, указывающая на namespace, в который установлен flux (альтернатива ключу --k8s-fwd-ns <flux installation ns> )
+- fluxctl list-workloads -a посмотреть все workloads, которые находятся в зоне видимости flux
+- fluxctl list-images -n microservices-demo - посмотреть все Docker образы, используемые в кластере (в namespace microservicesdemo)
+- fluxctl automate/deautomate - включить/выключить автоматизацию управления workload
+- fluxctl policy -w microservices-demo:helmrelease/frontend --tag-all='semver:~0.1' - установить всем сервисам в workload microservices-demo:helmrelease/frontend политику обновления образов из Registry на базе семантического версионирования c маской 0.1.*
+- fluxctl sync - приндительно запустить синхронизацию состояния git репозитория с кластером
+- fluxctl release --workload=microservicesdemo:helmrelease/frontend --update-all-images - принудительно инициировать сканирование Registry на предмет наличия свежих Docker
+образов
+</details>
+
+<details>
+<summary> <b> Установка Istio через Istio operator | Задание со ⭐ </b></summary>
+
+Уже установлен через:
+
+```yml
+  addons_config {
+    istio_config {
+      disabled = var.istio
+      auth     = "AUTH_NONE"
+    }
+```
+
+Подробнее можно найти в моей инфра репе: https://gitlab.com/i441/gcp-infra/-/blob/main/modules/gkecluster/gkecluster.tf
+
+
+Другие варианты установки Istio в кластер
+
+> с помощью istioctl :
+
+- [Документация по установке](https://istio.io/docs/setup/install/istioctl/)
+- [Шаги установки](https://istio.io/docs/setup/getting-started/)
+
+[Подробнее](https://istio.io/latest/docs/setup/additional-setup/config-profiles/) про configuration profile
+
+>❗ (will be deprecated) по установке Istio с использованием Helm:
+
+https://istio.io/latest/docs/setup/install/helm/
+
+> Istio operator
+
+https://istio.io/latest/docs/setup/install/operator/
+
+Пересоздал кластер без Istio через инфра репу. Будем ставить через оператор дабы осознать его архитектуру и выполнить доп. задание
+
+Написал helmfile по установке prometheus stack flux helm-operator. Лежит здесь canary_flagger_istio/helmfile
+
+```console
+cd canary_flagger_istio
+helmfile sync
+ka grafana-gateway.yaml
+ka grafana-virtualService.yaml
+```
+
+grafana-gateway.yaml и grafana-virtualService.yaml нужно добавить в постсинк хелмфайла.
+
+
+Ставим на локальную машину istioctl
+
+```console
+brew install istioctl
+```
+
+Запускам установку оператора
+
+```console
+istioctl operator init
+Installing operator controller in namespace: istio-operator using image: docker.io/istio/operator:1.11.3
+Operator controller will watch namespaces: istio-system
+✔ Istio operator installed                                                                                                                                                                                             
+✔ Installation complete
+```
+
+Появляется два namespace istio-system (пока пуст) и istio-operator
+
+```console
+kg all -n istio-operator
+NAME                                  READY   STATUS    RESTARTS   AGE
+pod/istio-operator-65b74f5c74-xl6tb   1/1     Running   0          3m
+
+NAME                     TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+service/istio-operator   ClusterIP   10.103.249.37   <none>        8383/TCP   3m
+
+NAME                             READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/istio-operator   1/1     1            1           3m
+
+NAME                                        DESIRED   CURRENT   READY   AGE
+replicaset.apps/istio-operator-65b74f5c74   1         1         1       3m
+```
+
+Идем дальше по инструкции:
+
+Install Istio with the operator:
+With the operator installed, you can now create a mesh by deploying an IstioOperator resource. To install the Istio demo configuration profile using the operator, run the following command:
+
+
+```console
+kubectl apply -f - <<EOF
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  namespace: istio-system
+  name: example-istiocontrolplane
+spec:
+  profile: demo
+EOF
+```
+
+Важно!!! С prometheus stack отдельном неймспейсе реализовать канарейку у меня не получилось. Пришлось поставить внутри istio-system
+
+```console
+ka https://raw.githubusercontent.com/istio/istio/1.11.3/samples/addons/prometheus.yaml 
+
+kg all -n istio-system  
+NAME                                        READY   STATUS    RESTARTS   AGE
+pod/istio-egressgateway-5fdc76bf94-cd75h    1/1     Running   0          128m
+pod/istio-ingressgateway-6bd7764b48-779nt   1/1     Running   0          128m
+pod/istiod-75bf895599-ktn6b                 1/1     Running   0          128m
+pod/prometheus-9f4947649-5rtbm              2/2     Running   0          31m
+
+NAME                           TYPE           CLUSTER-IP       EXTERNAL-IP    PORT(S)                                                                      AGE
+service/istio-egressgateway    ClusterIP      10.103.255.163   <none>         80/TCP,443/TCP                                                               128m
+service/istio-ingressgateway   LoadBalancer   10.103.250.224   34.107.58.10   15021:32227/TCP,80:32234/TCP,443:30902/TCP,31400:30632/TCP,15443:32039/TCP   128m
+service/istiod                 ClusterIP      10.103.249.134   <none>         15010/TCP,15012/TCP,443/TCP,15014/TCP                                        128m
+service/prometheus             ClusterIP      10.103.254.160   <none>         9090/TCP                                                                     31m
+
+NAME                                   READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/istio-egressgateway    1/1     1            1           128m
+deployment.apps/istio-ingressgateway   1/1     1            1           128m
+deployment.apps/istiod                 1/1     1            1           128m
+deployment.apps/prometheus             1/1     1            1           31m
+
+NAME                                              DESIRED   CURRENT   READY   AGE
+replicaset.apps/istio-egressgateway-5fdc76bf94    1         1         1       128m
+replicaset.apps/istio-ingressgateway-6bd7764b48   1         1         1       128m
+replicaset.apps/istiod-75bf895599                 1         1         1       128m
+replicaset.apps/prometheus-9f4947649              1         1         1       31m
+
+```
+
+Посмотреть профили можно так: istioctl profile list
+
+Вроде как все :) Можно создавать ресурсы.
+
+Вообще для осознания как оно работает и взаимодействует есть неплохой ман на хабре:
+
+https://habr.com/ru/company/southbridge/blog/441616/
+
+</details>
+
+<details>
+<summary> <b>Canary deployments с Flagger и Istio</b></summary>
+
+## Flagger
+Flagger - оператор Kubernetes, созданный для автоматизации canary deployments.
+
+Flagger может использовать:
+- Istio, Linkerd, App Mesh или nginx для маршрутизации трафика
+- Prometheus для анализа канареечного релиза
+
+![Flagger](kubernetes-gitops/images/Flagger.png)
+
+### Установка Flagger
+
+1. Добавление helm-репозитория flagger:
+
+
+```console
+helm repo add flagger https://flagger.app
+```
+
+Смотрим что там есть:
+
+```console
+helm search repo flagger
+NAME                    CHART VERSION   APP VERSION     DESCRIPTION                                       
+flagger/flagger         1.14.0          1.14.0          Flagger is a progressive delivery operator for ...
+flagger/grafana         1.6.0           7.2.0           Grafana dashboards for monitoring Flagger canar...
+flagger/loadtester      0.19.2          0.18.0          Flagger's load testing services based on rakyll...
+flagger/podinfo         5.0.0           5.0.0           Flagger canary deployment demo application
+```
+
+2. Установка CRD для Flagger:
+
+```console
+kubectl apply -f https://raw.githubusercontent.com/weaveworks/flagger/master/artifacts/flagger/crd.yaml
+customresourcedefinition.apiextensions.k8s.io/canaries.flagger.app created
+customresourcedefinition.apiextensions.k8s.io/metrictemplates.flagger.app created
+customresourcedefinition.apiextensions.k8s.io/alertproviders.flagger.app created
+```
+
+3. Установка flagger с указанием использовать Istio:
+
+```console
+helm upgrade --install flagger flagger/flagger \
+--namespace=istio-system \
+--set crd.create=false \
+--set meshProvider=istio \
+--set metricsServer=http://prometheus:9090
+Release "flagger" does not exist. Installing it now.
+NAME: flagger
+LAST DEPLOYED: Mon Oct  4 13:03:39 2021
+NAMESPACE: istio-system
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+Flagger installed
+```
+
+Смотрим, что появилось:
+
+```console
+kg all -n istio-system                                                                           ✖ ✹ ✭kubernetes-gitops 
+NAME                                        READY   STATUS    RESTARTS   AGE
+pod/flagger-bf4645f98-h9ms8                 1/1     Running   0          30m
+pod/istio-egressgateway-5fdc76bf94-cd75h    1/1     Running   0          128m
+pod/istio-ingressgateway-6bd7764b48-779nt   1/1     Running   0          128m
+pod/istiod-75bf895599-ktn6b                 1/1     Running   0          128m
+pod/prometheus-9f4947649-5rtbm              2/2     Running   0          31m
+
+NAME                           TYPE           CLUSTER-IP       EXTERNAL-IP    PORT(S)                                                                      AGE
+service/istio-egressgateway    ClusterIP      10.103.255.163   <none>         80/TCP,443/TCP                                                               128m
+service/istio-ingressgateway   LoadBalancer   10.103.250.224   34.107.58.10   15021:32227/TCP,80:32234/TCP,443:30902/TCP,31400:30632/TCP,15443:32039/TCP   128m
+service/istiod                 ClusterIP      10.103.249.134   <none>         15010/TCP,15012/TCP,443/TCP,15014/TCP                                        128m
+service/prometheus             ClusterIP      10.103.254.160   <none>         9090/TCP                                                                     31m
+
+NAME                                   READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/flagger                1/1     1            1           85m
+deployment.apps/istio-egressgateway    1/1     1            1           128m
+deployment.apps/istio-ingressgateway   1/1     1            1           128m
+deployment.apps/istiod                 1/1     1            1           128m
+deployment.apps/prometheus             1/1     1            1           31m
+
+NAME                                              DESIRED   CURRENT   READY   AGE
+replicaset.apps/flagger-6945d44b46                0         0         0       58m
+replicaset.apps/flagger-8666c9ffdc                0         0         0       85m
+replicaset.apps/flagger-bf4645f98                 1         1         1       30m
+replicaset.apps/istio-egressgateway-5fdc76bf94    1         1         1       128m
+replicaset.apps/istio-ingressgateway-6bd7764b48   1         1         1       128m
+replicaset.apps/istiod-75bf895599                 1         1         1       128m
+replicaset.apps/prometheus-9f4947649              1         1         1       31m
+```
+
+
+
+## Istio | Sidecar Injection
+
+- Изменим созданное ранее описание namespace microservices-demo
+
+```yml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: microservices-demo
+  labels:
+    <b>istio-injection: enabled</b>
+```
+
+Выделенная строка указывает на необходимость добавить в каждый pod sidecar контейнер с envoy proxy.
+
+После синхронизации проверку можно выполнить командой
+
+```console
+kubectl get ns microservices-demo --show-labels
+NAME                 STATUS   AGE   LABELS
+microservices-demo   Active   28m   fluxcd.io/sync-gc-mark=sha256.ZCXOZHiUsJpdcAhCiDLbuNXOLQQu-kDlwWUpDtJqc7g,istio-injection=enabled
+```
+
+Самый простой способ добавить sidecar контейнер в уже запущенные pod - удалить их:
+```console
+kubectl delete pods --all -n microservices-demo
+pod "adservice-76b5db9769-6rj6g" deleted
+pod "cartservice-667c67fd7b-w775g" deleted
+pod "cartservice-redis-master-0" deleted
+pod "checkoutservice-698c6fcbc-dqm88" deleted
+pod "currencyservice-848cb8f97f-68kjx" deleted
+pod "emailservice-76c5db5b87-hk64c" deleted
+pod "frontend-6455d4b498-v2fkk" deleted
+pod "loadgenerator-5879c599b7-2j4b7" deleted
+pod "paymentservice-5b56bb9999-dwqkd" deleted
+pod "productcatalogservice-756b669fbc-fsxfm" deleted
+pod "recommendationservice-ff68c4589-kb8fr" deleted
+pod "shippingservice-74f85bb867-7bznb" deleted
+```
+
+Смотрим появились ли sidecar контейнеры внутри подов. 
+
+## Доступ к frontend
+
+На текущий момент у нас отсутствует ingress и мы не можем получить доступ к frontend снаружи кластера. В то же время Istio в качестве альтернативы классическому ingress
+предлагает свой набор абстракций.
+
+Чтобы настроить маршрутизацию трафика к приложению с использованием Istio, нам необходимо добавить ресурсы [Virtual services](https://istio.io/latest/docs/concepts/traffic-management/#virtual-services) и [Gateways](https://istio.io/latest/docs/concepts/traffic-management/#gateways)
+
+Создаем директорию deploy/istio и поместим в нее следующие манифесты:
+
+- frontend-vs.yaml
+- frontend-gw.yaml
+
+frontend-vs.yaml:
+
+```yml
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: frontend
+  namespace: microservices-demo
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - frontend
+  http:
+    - route:
+      - destination:
+          host: frontend
+          port:
+            number: 80
+```
+
+frontend-gw.yaml:
+
+```yml
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: frontend-gateway
+  namespace: microservices-demo
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "*"
+
+```
+
+Созданный Gateway можно увидеть следующим образом:
+
+```console
+kubectl get gateway -n microservices-demo
+NAME               AGE
+frontend   31m
+```
+
+У меня уже были эти ресурсы т.к. чарты копировались из отусовской репы. В них есть ошибка, нету namespace: microservices-demo.
+
+Решим эту проблему одновременно выполнив самостоятельное задание. Запушил изменения в репу.
+
+Внешний доступ появился. Заодно видим как отпустило loadgenerator.
+```console
+kg gateway,virtualservices -n microservices-demo
+NAME                                   AGE
+gateway.networking.istio.io/frontend   76m
+
+NAME                                          GATEWAYS       HOSTS                             AGE
+virtualservice.networking.istio.io/frontend   ["frontend"]   ["shop.yogatour.su","frontend"]   76m
+```
+
+## Flagger | Canary
+
+Перейдем непосредственно к настройке канареечных релизов. Добавим в Helm chart frontend еще один файл - canary.yaml. В нем будем хранить описание стратегии, по которой необходимо обновлять данный микросервис.
+
+Узнать подробнее о Canary Custom Resource можно по [ссылке](https://docs.flagger.app/usage/how-it-works#canary-custom-resource)
+
+У меня canary.yaml уже был, но опять не было namespace. Помимо этого, есть ошибка:
+
+
+error: unable to recognize "deploy/charts/frontend/templates/canary.yaml": no matches for kind "Canary" in version "flagger.app/v1alpha3"
+
+Смотрим доку и видим, что уже есть apiVersion: flagger.app/v1beta1
+
+```console
+kubectl get canary -n microservices-demo
+NAME       STATUS         WEIGHT   LASTTRANSITIONTIME
+frontend   Initializing   0        2021-10-04T12:04:00Z
+kubectl get pods -n microservices-demo -l app=frontend-primary
+NAME                                READY   STATUS    RESTARTS   AGE
+frontend-primary-859b984bf8-sth86   1/2     Running   0          11s
+kubectl get canary -n microservices-demo                                                      master 
+NAME       STATUS        WEIGHT   LASTTRANSITIONTIME
+frontend   Initialized   0        2021-10-04T12:05:05Z
+kubectl get pods -n microservices-demo -l app=frontend-primary                                master 
+NAME                                READY   STATUS    RESTARTS   AGE
+frontend-primary-859b984bf8-sth86   2/2     Running   0          3m31s
+```
+
+
+В логах видим проблему c prometheus.
+
+Похоже ставить его через helm chart было не верно. Как и istio через оператора) 
+
+В итоге разворот prometheus внутри istio-system считаю не верным. Однако в данном задании сделал так.
+
+
+Итог:
+
+```console
+cd ..
+make tag=v0.0.13 build_frontend release_frontend
+kubectl get canaries -n microservices-demo
+NAME       STATUS      WEIGHT   LASTTRANSITIONTIME
+frontend   Succeeded   0        2021-10-06T11:41:26Z
+
+ Warning  Synced  33m                flagger  frontend-primary.microservices-demo not ready: waiting for rollout to finish: observed deployment generation less than desired generation
+  Normal   Synced  32m (x2 over 33m)  flagger  all the metrics providers are available!
+  Normal   Synced  32m                flagger  Initialization done! frontend.microservices-demo
+  Normal   Synced  29m                flagger  New revision detected! Scaling up frontend.microservices-demo
+  Normal   Synced  28m                flagger  Starting canary analysis for frontend.microservices-demo
+  Normal   Synced  28m                flagger  Advance frontend.microservices-demo canary weight 10
+  Normal   Synced  27m                flagger  Advance frontend.microservices-demo canary weight 20
+  Normal   Synced  26m                flagger  Advance frontend.microservices-demo canary weight 30
+  Normal   Synced  25m                flagger  Copying frontend.microservices-demo template spec to frontend-primary.microservices-demo
+  Normal   Synced  24m                flagger  Routing all traffic to primary
+  Normal   Synced  23m                flagger  (combined from similar events): Promotion completed! Scaling down frontend.microservices-demo
+```
+
+
+Как итоге считаю задание "Canary deployments с Flagger и Istio" выполненным, однако на мой взгляд:
+
+- istio нужно ставить через helm chart на отдельный infra пул
+- нужно понять как быть с prometheus stack, верно ли его ставить в отдельный namespace? Если нет, то требуется более детальное описание установки как Istio вместе с его аддонами типа Kiali, prometheus + grafana + Егерь. 
+
+</details>
+
+<details>
+<summary> <b>Flagger | Задание со № 1 ⭐ </b></summary>
+
+- Реализуем канареечное развертывание для одного из оставшихся микросервисов 
+- Опишем сложности, с которыми пришлось столкнуться в PR и соответствующим образом модифицируйте файлы в GitLab репозитории
+
+Во-первых, держать микросервисы в одной репе не верно, на мой взгляд. Нужно разделять сервисы по отдельным репам. Сами артефакты хранить в паблике тоже не верно.
+Во-вторых, нам нужно проверять чем-то работу канарейки генерируя траффик
+
+Для реализации канареечного развертывания другого сервиса нам потребуем описать саму канарейку и запушить новый релиз в докер хаб.
+
+Берем простенький currencyservice, не работоспособность которого приведет к отказу в корректной работе фронта. Нагрузочное тестирование через loadgenerator () тестами покрывает этот сервис.
+
+```yml
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: currencyservice
+  namespace: microservices-demo
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: currencyservice
+  service:
+    name: currencyservice
+    port: 7000
+    portName: grpc
+    targetPort: 7000
+  analysis:
+    interval: 1m
+    threshold: 1
+    maxWeight: 30
+    stepWeight: 10
+    metrics:
+    - name: request-success-rate
+      threshold: 99
+      interval: 1m
+```
+
+Я выпили отсюда istio, он нам не нужен и описал корректно сервис. Все остальное оставляем как есть. Тесты у нас идут через [loadgenerator](https://locust.io/). А можно было бы запулить через это:
+
+https://docs.flagger.app/usage/how-it-works#canary-custom-resource
+
+Проверяем развертывание:
+
+```console
+kubectl get canaries -n microservices-demo
+NAME              STATUS         WEIGHT   LASTTRANSITIONTIME
+currencyservice   Initializing   0        2021-10-06T14:15:20Z
+frontend          Succeeded      0        2021-10-06T11:41:26Z
+kubectl get canaries -n microservices-demo
+NAME              STATUS        WEIGHT   LASTTRANSITIONTIME
+currencyservice   Initialized   0        2021-10-06T14:39:56Z
+frontend          Succeeded     0        2021-10-06T11:41:26Z
+kubectl describe canary currencyservice -n microservices-demo
+....
+  Normal   Synced  3m43s (x2 over 4m43s)  flagger  all the metrics providers are available!
+  Normal   Synced  3m43s                  flagger  Initialization done! currencyservice.microservices-demo
+```
+
+Проверяем доступен ли сайт. Доступен.
+
+Пробуем собрать новый образ и запушит его в реджестри.
+
+Сначала глянем на чем у нас работает сервис:
+```console
+fluxctl list-images -n microservices-demo
+microservices-demo:helmrelease/currencyservice           chart-image        chudinanton/currencyservice        
+                                                                            '-> v0.0.1                         02 Oct 21 11:07 UTC
+                                                                                flux-sync                      02 Oct 21 21:44 UTC
+                                                                                v.0.0.2                        02 Oct 21 17:12 UTC
+                                                                                v.0.0.3                        03 Oct 21 10:36 UTC
+```
+
+```console
+cd ..
+make tag=v0.0.4 build_currencyservice release_currencyservice
+```
+
+Ждем и наблюдаем.
+
+```console
+kubectl get canaries -n microservices-demo
+NAME              STATUS        WEIGHT   LASTTRANSITIONTIME
+currencyservice   Progressing   0        2021-10-06T14:53:56Z
+frontend          Succeeded     0        2021-10-06T11:41:26Z
+
+kubectl describe canary currencyservice -n microservices-demo
+....
+  Normal   Synced  15m (x2 over 16m)  flagger  all the metrics providers are available!
+  Normal   Synced  15m                flagger  Initialization done! currencyservice.microservices-demo
+  Normal   Synced  88s                flagger  New revision detected! Scaling up currencyservice.microservices-demo
+  Normal   Synced  28s                flagger  Starting canary analysis for currencyservice.microservices-demo
+  Normal   Synced  28s                flagger  Advance currencyservice.microservices-demo canary weight 10
+
+kubectl get canaries -n microservices-demo
+NAME              STATUS        WEIGHT   LASTTRANSITIONTIME
+currencyservice   Progressing   10       2021-10-06T14:54:56Z
+frontend          Succeeded     0        2021-10-06T11:41:26Z
+
+kubectl get canaries -n microservices-demo
+NAME              STATUS      WEIGHT   LASTTRANSITIONTIME
+currencyservice   Promoting   0        2021-10-06T14:57:56Z
+frontend          Succeeded   0        2021-10-06T11:41:26Z
+
+kubectl get canaries -n microservices-demo
+NAME              STATUS       WEIGHT   LASTTRANSITIONTIME
+currencyservice   Finalising   0        2021-10-06T14:58:56Z
+frontend          Succeeded    0        2021-10-06T11:41:26Z
+
+kubectl get canaries -n microservices-demo
+NAME              STATUS      WEIGHT   LASTTRANSITIONTIME
+currencyservice   Succeeded   0        2021-10-06T14:59:56Z
+frontend          Succeeded   0        2021-10-06T11:41:26Z
+
+kubectl describe canary currencyservice -n microservices-demo
+Events:
+  Type     Reason  Age                From     Message
+  Normal   Synced  20m (x2 over 21m)  flagger  all the metrics providers are available!
+  Normal   Synced  20m                flagger  Initialization done! currencyservice.microservices-demo
+  Normal   Synced  6m20s              flagger  New revision detected! Scaling up currencyservice.microservices-demo
+  Normal   Synced  5m20s              flagger  Starting canary analysis for currencyservice.microservices-demo
+  Normal   Synced  5m20s              flagger  Advance currencyservice.microservices-demo canary weight 10
+  Normal   Synced  4m20s              flagger  Advance currencyservice.microservices-demo canary weight 20
+  Normal   Synced  3m20s              flagger  Advance currencyservice.microservices-demo canary weight 30
+  Normal   Synced  2m20s              flagger  Copying currencyservice.microservices-demo template spec to currencyservice-primary.microservices-demo
+  Normal   Synced  80s                flagger  Routing all traffic to primary
+  Normal   Synced  20s                flagger  Promotion completed! Scaling down currencyservice.microservices-demo
+
+```
+
+Никаких проблем как с сайтом так и с канарейкой мы не видим. Помним, что если что-то пойдет не так, то сайт ляжет! Корявенький образ затестим чуть позже (допустим специально ошибку в коде)
+
+Допустим ошибку в исходниках и соберем образ.
+
+```console
+cd microservices-demo/src/currencyservice/
+```
+
+Подшаманим client.js
+
+```js
+co2nst logger = pino({
+  name: 'currencyservice-client',
+  messageKey: 'message',
+  changeLevelName: 'severity',
+  useLevelLabels: true
+});
+
+```
+
+ и server.js
+
+```js
+el2se {
+  console.log("Profiler enabled.")
+  require('@google-cloud/profiler').start({
+    serviceContext: {
+      service: 'currencyservice',
+      version: '1.0.0'
+    }
+  });
+}
+```
+
+Соберем:
+
+```console
+make tag=v0.0.5 build_currencyservice release_currencyservice
+```
+
+Ждем и наблюдаем:
+
+```console
+kubectl get canaries -n microservices-demo
+NAME              STATUS        WEIGHT   LASTTRANSITIONTIME
+currencyservice   Progressing   0        2021-10-06T15:05:56Z
+frontend          Succeeded     0        2021-10-06T11:41:26Z
+
+kubectl describe canary currencyservice -n microservices-demo
+...
+  Normal   Synced  19s (x2 over 12m)  flagger  New revision detected! Scaling up currencyservice.microservices-demo
+  Warning  Synced  23s                flagger  canary deployment currencyservice.microservices-demo not ready: waiting for rollout to finish: 0 of 1 updated replicas are available
+```
+
+Сайт работает!  А почему? Потому-что flagger даже не стал заруливать траффик на битый под! А как он понял что он битый? livenessProbe и readinessProbe животворящие!
+
+Дожидаемся x10 и смотрим:
+
+```console
+kubectl describe canary currencyservice -n microservices-demo
+  Warning  Synced  77s (x9 over 9m17s)  flagger  canary deployment currencyservice.microservices-demo not ready: waiting for rollout to finish: 0 of 1 updated replicas are available
+  Warning  Synced  17s                  flagger  Rolling back currencyservice.microservices-demo progress deadline exceeded canary deployment currencyservice.microservices-demo not ready: waiting for rollout to finish: 0 of 1 updated replicas are available
+  Warning  Synced  17s                  flagger  Canary failed! Scaling down currencyservice.microservices-demo
+
+kubectl get canaries -n microservices-demo
+NAME              STATUS      WEIGHT   LASTTRANSITIONTIME
+currencyservice   Failed      0        2021-10-06T15:15:56Z
+frontend          Succeeded   0        2021-10-06T11:41:26Z
+```
+
+Все деплой неудачный. Хорошо бы получить уведомление об этом. Но это следующее задание.
+
+Чиним образ и деплоим заново. Все.
+
+</details>
+
+<details>
+<summary> <b>Flagger | Задание со № 2 ⭐ </b></summary>
+
+- Реализуем получение нотификаций о релизах в Slack (используем отдельный workspace, не отправляйте алерты в otus-devops.slack.com) или
+в Alertmanager при помощи данной [инструкции](https://docs.flagger.app/usage/alerting)
+- Опишем получившийся результат в PR и соответствующим образом модифицируем файлы в GitLab репозитории
+
+Инструкция по созданию приложения в слаке:
+
+https://api.slack.com/messaging/webhooks
+
+Запиливаем:
+
+```console
+helm upgrade --install flagger flagger/flagger \
+--namespace=istio-system \
+--set crd.create=false \
+--set meshProvider=istio \
+--set metricsServer=http://prometheus:9090 \
+--set slack.url=https://hooks.slack.com/services/XXXXXXXXXXXXXXXXXXXXXXXX \
+--set slack.channel=hw11 \
+--set slack.user=flagger_notification
+```
+
+Тестим фронт:
+
+```console
+make tag=v0.0.14 build_frontend release_frontend
+```
+
+Пруф:
+
+![slack_ok](kubernetes-gitops/images/slack_ok.png)
+
+</details>
+
+<details>
+<summary> <b>Инфраструктурный репозиторий | Задание со ⭐</b></summary>
+
+- Создадим дополнительный репозиторий и поместим туда инфраструктурный код для развертывания всех сервисов, использующихся в данном домашнем задании (Flux, Flagger, Istio, Helmoperator, etc...)
+- В качестве решения для развертывания можно использовать Helmfile, [Terraform Provider для Helm](https://github.com/hashicorp/terraform-provider-helm) или другой вариант.
+- Опишем получившийся результат в PR
+
+Terraform интересен, но для разнообразия используем Helmfile
+
+TODO:
+
+https://gitlab.com/express42/kubernetes-platform-demo/service-layer
+
+Есть прекрасная репка, но чарты там устарели. К примеру, istio так уже не развернуть. Нужно переписывать.
+
+Мне нужно будет разворачивать сервис уровень на своих виртуалках, поэтому я не буду делать это задание сейчас для GCP, а опишу установку при выполнении проекта.
+
+Я уже описал частично установку через hеlmfile: canary_flagger_istio/helmfile.yaml но это колхоз по сравнению с тем, что нужно сделать.
+
+Возможно позже найдутся силы и время на GCP :)
+
+</details>
+
+<details>
+<summary> <b>Distributed Tracing | Задание со ⭐ </b></summary>
+
+- Установите Jaeger и научитесь собирать трейсы: Непосредственно с микросервисов, С sidecar контейнеров istio-proxy
+- Опишем получившийся результат в PR и соответствующим образом модифицируем файлы в GitLab репозитории
+
+Ставим колхозным образом jaeger:
+
+```console
+ka https://raw.githubusercontent.com/istio/istio/1.11.3/samples/addons/jaeger.yaml
+```
+
+Быстрый способ открыть панельку:
+
+```console
+istioctl dashboard jaeger
+```
+
+Видим там только proxy трейсы. А почему? Потому что стоит неверная переменная в чартах с других ns. Исправляем.
+
+Получаем два типа трейсов, как указано в задании. имя.NS - из proxy istio. Просто имя - трейсы уже непосредственно из подов.
+
+![trace_1](kubernetes-gitops/images/trace_1.png)
+
+![trace_2](kubernetes-gitops/images/trace_2.png)
+
+![trace_2](kubernetes-gitops/images/trace_3.png)
+
+</details>
+
+<details>
+<summary> <b>Monorepos: Please don’t! | Задание с ⭐⭐ </b></summary>
+
+- Перенесем каждый микросервис в выделенный репозиторий 
+- Опробуем GitOps подход с использованием подобной схемы
+- Опишем получившийся результат в PR
+
+Точка зрения адептов полирепы:
+
+https://medium.com/@mattklein123/monorepos-please-dont-e9a279be011b
+
+Альтернативная точка зрения адептов монорепы:
+
+https://habr.com/ru/company/oleg-bunin/blog/531632/
+
+
+1. Создаем отдельную группу в gitlab и нужные репозитории. Пушим их с src.
+
+Что получилось:
+
+https://gitlab.com/polyrepo-microservices-demo
+
+2. Теперь нужно написать CI для каждого сервиса. В этом нам поможет следующий CI файл:
+
+https://gitlab.com/express42/kubernetes-platform-demo/microservices-demo/-/blob/master/.gitlab-ci.yml
+
+
+Будет 4 ступени:
+
+```yml
+stages:
+  - static-analysis # здесь мы сканируем код сонаркубом
+  - build # билдим в случае удачи static-analysis, зависимость будет задавать через needs: 
+  - scan # сканирование образа через trivy в случае удачи build
+  - push # пуш в случае удачи scan
+```
+
+Далее делаем шаблоны:
+
+Проставляющий tag docker
+
+```yml
+.common:
+  tags:
+    - docker
+```
+
+Использование образа docker:20.10.8, авторизация и logout
+
+```yml
+.docker-template:
+  extends: .common
+  image:
+    name: docker:20.10.8
+  services:
+    - docker:20.10.8-dind
+  before_script:
+    - echo -n $DOCKER_REGISTRY_PASSWORD | docker login --username $DOCKER_REGISTRY_USER --password-stdin
+  after_script:
+    - docker logout
+```
+
+Шаблон анализа через sonar-scanner
+
+```yml
+.static-analysis:common:
+  extends: .common
+  stage: static-analysis
+  image:
+    name: sonarsource/sonar-scanner-cli:4.6
+  script:
+    - sonar-scanner
+      -D"sonar.host.url=http://sonarqube.yogatour.su/"
+      -D"sonar.scm.disabled=true"
+      -D"sonar.projectKey=${SERVICE}"
+      -D"sonar.login=${SONARQUBE_TOKEN}"
+      -D"sonar.projectVersion=$CI_COMMIT_REF_NAME-$CI_COMMIT_SHA"
+      -D"sonar.projectBaseDir=./"
+```
+
+Шаблон сборки включающий в себя .docker-template
+
+```yml
+.build:common:
+  extends: .docker-template
+  stage: build
+  variables:
+    SERVICE: SERVICE
+  script:
+    - docker build . -f Dockerfile -t $DOCKER_REGISTRY_USER/$SERVICE:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHA
+    - docker push $DOCKER_REGISTRY_USER/$SERVICE:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHA
+```
+
+Шаблон скана через trivy
+
+```yml
+.scan:common:
+  extends: .common
+  stage: scan
+  image: docker:20.10.8
+  services:
+    - docker:20.10.8-dind
+  allow_failure: true
+  before_script:
+    - apk add --no-cache curl
+    - export VERSION=$(curl --silent "https://api.github.com/repos/aquasecurity/trivy/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    - echo $VERSION
+    - wget https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz
+    - tar zxvf trivy_${VERSION}_Linux-64bit.tar.gz
+  script:
+    - ./trivy --exit-code 0 --severity CRITICAL --no-progress $DOCKER_REGISTRY_USER/$SERVICE:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHA
+  cache:
+    paths:
+      - $CI_PROJECT_DIR/.trivycache/
+```
+
+И непосредственно сам push шаблон:
+
+```yml
+.push:common:
+  extends: .docker-template
+  stage: push
+  variables: 
+    SERVICE: SERVICE
+  script:
+    - docker pull $DOCKER_REGISTRY_USER/$SERVICE:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHA
+    - docker tag $DOCKER_REGISTRY_USER/$SERVICE:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHA $DOCKER_REGISTRY_USER/$SERVICE:$CI_COMMIT_TAG
+    - docker push $DOCKER_REGISTRY_USER/$SERVICE:$CI_COMMIT_TAG
+    - docker pull $DOCKER_REGISTRY_USER/$SERVICE:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHA
+    - docker tag $DOCKER_REGISTRY_USER/$SERVICE:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHA $DOCKER_REGISTRY_USER/$SERVICE:latest
+    - docker push $DOCKER_REGISTRY_USER/$SERVICE:latest
+```
+
+Ну и непосредственно собираем сам CI. У меня проще тк полирепка, и сервисы разделены на отдельные репы. Пример для adservice:
+
+```yml
+static-analysis:adservice:
+  extends: .static-analysis:common
+  variables: 
+    SERVICE: adservice
+  only:
+    changes:
+      - ./**/*
+
+build:adservice:
+  extends: .build:common
+  variables: 
+    SERVICE: adservice
+  only:
+    changes:
+      - ./**/*
+  needs: ["static-analysis:adservice"]
+
+scan:adservice:
+  extends: .scan:common
+  variables: 
+    SERVICE: adservice
+  only:
+    changes:
+      - ./**/*
+  needs: ["build:adservice"]
+
+push:adservice:
+  extends: .push:common
+  variables: 
+    SERVICE: adservice
+  only:
+    refs:
+      - /^v\d+\.\d+\.\d+/
+    changes:
+      - ./**/*
+  needs: ["scan:adservice"]
+
+
+```
+
+У нас полирепа, поэтому  changes: - src/adservice/**/* мы выпиливаем.
+
+3. Ставим sonarqube и генерируем токен, который помещаем в переменные Gitlab.
+
+```console
+helm upgrade --install sonarqube stable/sonarqube -f sonarqube.yaml -n istio-system
+Release "sonarqube" does not exist. Installing it now.
+WARNING: This chart is deprecated
+NAME: sonarqube
+LAST DEPLOYED: Thu Oct  7 16:21:18 2021
+NAMESPACE: istio-system
+STATUS: deployed
+REVISION: 1
+NOTES:
+This chart has been deprecated and moved to https://github.com/oteemo/charts
+
+
+1. Get the application URL by running these commands:
+  export POD_NAME=$(kubectl get pods --namespace istio-system -l "app=sonarqube,release=sonarqube" -o jsonpath="{.items[0].metadata.name}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl port-forward $POD_NAME 8080:9000
+
+
+ka sonarqube-gateway.yaml
+gateway.networking.istio.io/sonarqube created
+ka sonarqube-virtualService.yaml
+virtualservice.networking.istio.io/sonarqube created
+```
+
+4. Заодно настраиваем интеграцию репы со слаком.
+
+5. Проверяем. Смотрим на какой версии образа работает adservice и пушим с тегом v0.0.13
+
+```console
+fluxctl list-images -n microservices-demo
+WORKLOAD                                                 CONTAINER          IMAGE                                                 CREATED
+microservices-demo:deployment/adservice                  server             chudinanton/adservice                                 
+                                                                            |   v0.0.11-e8072f8b8b48b765c0016dbcd92728c1eb6ee4bb  07 Oct 21 17:32 UTC
+                                                                            |   v0.0.10-298233d5a5693773ab8058ae7fd976a0ab74f3f2  07 Oct 21 17:16 UTC
+                                                                            '-> v0.0.9                                            07 Oct 21 15:11 UTC
+                                                                                v0.0.9-39fbdeda7a4feca0ec85dce6fe1c73bd3cdd61e8   07 Oct 21 15:11 UTC
+                                                                                v0.0.8-b1c21334bb5d6e8a3db08ac96132aaddee30ce4e   07 Oct 21 15:01 UTC
+                                                                                v.0.0.4                                           03 Oct 21 11:05 UTC
+                                                                                v.0.0.3                                           03 Oct 21 10:29 UTC
+                                                                                flux-sync                                         02 Oct 21 21:38 UTC
+                                                                                v.0.0.2                                           02 Oct 21 17:05 UTC
+                                                                                v0.0.1                                            02 Oct 21 11:01 UTC
+
+git commit -am 'fix readme' && git tag v0.0.13 && git push --tags
+
+```
+
+Наблюдаем за тем, что появилась новая ветка v0.0.13. И pipeline из 4-х стадий.
+
+pipeline простой и не учитывает, того, что пушить с тегом в реджестри надо бы только после мерджа в мастер из фича ветки. Но для примера понимания полирепы подойдет :)
+
+Ну и смотрим на flux:
+
+```console
+fluxctl list-images -n microservices-demo
+WORKLOAD                                                 CONTAINER          IMAGE                                                 CREATED
+microservices-demo:deployment/adservice                  server             chudinanton/adservice                                 
+                                                                            |   latest                                            07 Oct 21 18:48 UTC
+                                                                            '-> v0.0.13                                           07 Oct 21 18:48 UTC
+                                                                                v0.0.13-7c5ace861fbe4f4973ffef689b30f75abbdaade2  07 Oct 21 18:48 UTC
+                                                                                v0.0.12                                           07 Oct 21 18:29 UTC
+                                                                                v0.0.12-a741ec109095c21c6fb1d41977542cd2ad4aa94c  07 Oct 21 18:29 UTC
+                                                                                v0.0.12-5238dbdbb66c5c054a6a814906f6f05e23378515  07 Oct 21 17:56 UTC
+                                                                                v0.0.11-e8072f8b8b48b765c0016dbcd92728c1eb6ee4bb  07 Oct 21 17:32 UTC
+                                                                                v0.0.10-298233d5a5693773ab8058ae7fd976a0ab74f3f2  07 Oct 21 17:16 UTC
+                                                                                v0.0.9                                            07 Oct 21 15:11 UTC
+                                                                                v0.0.9-39fbdeda7a4feca0ec85dce6fe1c73bd3cdd61e8   07 Oct 21 15:11 UTC
+```
+
+Обращаем внимание, что flux раскатывает нам не из latest или $CI_COMMIT_REF_NAME-$CI_COMMIT_SHA, а из $CI_COMMIT_TAG попадающего под соответствующий паттерн.
+
+
+- Также, удобно задать переменные в рамках группы дабы не вбивать их каждый раз в отдельные репы.
+
+- Делаем по аналогии на всех репах подобный CI файл. А также проекты в sonarqube.
+
+Успешно пройденные pipelines:
+- https://gitlab.com/polyrepo-microservices-demo/adservice/-/pipelines/385669846
+- https://gitlab.com/polyrepo-microservices-demo/cartservice/-/pipelines/385673291
+- https://gitlab.com/polyrepo-microservices-demo/checkoutservice/-/pipelines/385674801
+- https://gitlab.com/polyrepo-microservices-demo/currencyservice/-/pipelines/385678583
+- https://gitlab.com/polyrepo-microservices-demo/emailservice/-/pipelines/385680234
+- https://gitlab.com/polyrepo-microservices-demo/frontend/-/pipelines/385682010
+- https://gitlab.com/polyrepo-microservices-demo/loadgenerator/-/pipelines/385683269
+- https://gitlab.com/polyrepo-microservices-demo/paymentservice/-/pipelines/385683870
+- https://gitlab.com/polyrepo-microservices-demo/productcatalogservice/-/pipelines/385684260
+- https://gitlab.com/polyrepo-microservices-demo/recommendationservice/-/pipelines/385685002
+- https://gitlab.com/polyrepo-microservices-demo/shippingservice/-/pipelines/385689120
+
+Ссылка на анализ в Sonarqube. JS плагин не установлен, ввиду этого проверяется не все. Да и старый он просто для примера установлен:
+
+http://sonarqube.yogatour.su/projects
+
+Отработанный flux Auto-release в microservices-demo репе. В нее смотрит flux на соответствующие helm-releases. 
+
+![flux_Auto-release_ok](kubernetes-gitops/images/flux_Auto-release_ok.png)
+
+</details>
+
+<details>
+<summary> <b>Argo CD | Задание с ⭐⭐ </b></summary>
+
+- Повторим проделанную работу с использованием стека инструментов Argo CD
+- Опишем результат в PR и выложим все дополнительные манифесты в GitLab репозиторий
+
+Сейчас за GitOps у нас отвечает Flux. Переделам на Argo CD
+
+Нам надо выпилить наш Flux, который натравлен в наш microservices-demo, в папку deploy. Также, у нас есть helm-operator следящий за helm release.
+
+Удаляем их:
+
+```console
+helm uninstall flux --namespace flux
+helm uninstall helm-operator --namespace flux
+kubectl delete ns flux
+```
+
+У Argo CD есть свой Helm репозиторий. 
+
+https://github.com/argoproj/argo-helm/tree/master/charts/argo-cd
+
+Установим и скачаем его, посмотрим что есть внутри.
+
+```console
+helm repo add argo https://argoproj.github.io/argo-helm
+helm pull argo/argo-cd
+```
+Читаем README и видим там ссылку на оф. ман:
+
+https://www.arthurkoziel.com/setting-up-argocd-with-helm/
+
+Из README становится понятно, что инструмент довольно обширный и для его глубокого изучения потребуется не мало времени.
+
+Попробуем поставить без HA с дефолтными настройками в отдельном NS.
+
+```console
+helm upgrade --install argocd argo/argo-cd -n argocd --create-namespace
+Release "argocd" does not exist. Installing it now.
+NAME: argocd
+LAST DEPLOYED: Sun Oct 10 15:15:24 2021
+NAMESPACE: argocd
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+In order to access the server UI you have the following options:
+
+1. kubectl port-forward service/argocd-server -n argocd 8080:443
+
+    and then open the browser on http://localhost:8080 and accept the certificate
+
+2. enable ingress in the values file `server.ingress.enabled` and either
+      - Add the annotation for ssl passthrough: https://github.com/argoproj/argo-cd/blob/master/docs/operator-manual/ingress.md#option-1-ssl-passthrough
+      - Add the `--insecure` flag to `server.extraArgs` in the values file and terminate SSL at your ingress: https://github.com/argoproj/argo-cd/blob/master/docs/operator-manual/ingress.md#option-2-multiple-ingress-objects-and-hosts
+
+
+After reaching the UI the first time you can login with username: admin and the random password generated during the installation. You can find the password by running:
+
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+
+(You should delete the initial secret afterwards as suggested by the Getting Started Guide: https://github.com/argoproj/argo-cd/blob/master/docs/getting_started.md#4-login-using-the-cli
+```
+
+Посмотрим, что развернулось:
+```console
+kg all -n argocd
+NAME                                                 READY   STATUS    RESTARTS   AGE
+pod/argocd-application-controller-7996f79bbd-5mgf5   1/1     Running   0          109s
+pod/argocd-dex-server-54c95db4f6-dh62d               1/1     Running   0          109s
+pod/argocd-redis-8576c766f8-9klsd                    1/1     Running   0          109s
+pod/argocd-repo-server-6694b7b565-q9ppb              1/1     Running   0          109s
+pod/argocd-server-6f695b4f66-8hvvp                   1/1     Running   0          109s
+
+NAME                                    TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)             AGE
+service/argocd-application-controller   ClusterIP   10.103.253.202   <none>        8082/TCP            112s
+service/argocd-dex-server               ClusterIP   10.103.245.99    <none>        5556/TCP,5557/TCP   111s
+service/argocd-redis                    ClusterIP   10.103.248.225   <none>        6379/TCP            112s
+service/argocd-repo-server              ClusterIP   10.103.246.137   <none>        8081/TCP            111s
+service/argocd-server                   ClusterIP   10.103.250.212   <none>        80/TCP,443/TCP      112s
+
+NAME                                            READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/argocd-application-controller   1/1     1            1           112s
+deployment.apps/argocd-dex-server               1/1     1            1           112s
+deployment.apps/argocd-redis                    1/1     1            1           112s
+deployment.apps/argocd-repo-server              1/1     1            1           112s
+deployment.apps/argocd-server                   1/1     1            1           112s
+
+NAME                                                       DESIRED   CURRENT   READY   AGE
+replicaset.apps/argocd-application-controller-7996f79bbd   1         1         1       113s
+replicaset.apps/argocd-dex-server-54c95db4f6               1         1         1       113s
+replicaset.apps/argocd-redis-8576c766f8                    1         1         1       113s
+replicaset.apps/argocd-repo-server-6694b7b565              1         1         1       113s
+replicaset.apps/argocd-server-6f695b4f66                   1         1         1       113s
+```
+
+В поствыводе сказано, что UI у нас здесь service/argocd-server.
+
+Сделаем для него внешний доступ через istio
+
+```console
+cd kubernetes-gitops/argo-cd
+ka argo-cd-gateway.yaml
+gateway.networking.istio.io/argocd created
+ka argo-cd-virtualService.yaml
+virtualservice.networking.istio.io/argocd created
+```
+
+URL: https://argocd.yogatour.su/
+
+По умолчанию имее следующие креды:
+
+
+- login: admin
+
+- password (kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d: r73mGNxys8boCnYu
+
+
+Далее ставим CLI:
+
+https://argo-cd.readthedocs.io/en/stable/cli_installation/
+
+```console
+brew install argocd
+argocd login argocd.yogatour.su --username admin --grpc-web --insecure
+argocd cluster add gke-cluster-prod
+```
+
+Поставка приложения в microservices-demo у нас идет по трем папкам:
+
+- charts
+- namespaces
+- releases
+
+Важный момент это отслеживание изменившейся версии образа в реджестри. Гуглим статью Олега Константинова:
+
+https://habr.com/ru/company/otus/blog/555832/
+
+Ставим по доке argocd-image-updater:
+
+https://argocd-image-updater.readthedocs.io/en/stable/install/start/
+
+```console
+helm upgrade -install argocd-image-updater argo/argocd-image-updater -f argocd-image-updater-values.yaml -n argocd
+Release "argocd-image-updater" has been upgraded. Happy Helming!
+NAME: argocd-image-updater
+LAST DEPLOYED: Mon Oct 11 00:33:04 2021
+NAMESPACE: argocd
+STATUS: deployed
+REVISION: 2
+TEST SUITE: None
+
+argocd repo add https://gitlab.com/chudinanton108/microservices-demo-argocd.git --username chudinanton108 --password
+```
+
+Создаем первое приложение - это NS:
+
+microservices-demo.yaml
+
+```yml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: microservices-demo
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://gitlab.com/chudinanton108/microservices-demo-argocd.git'
+    path: deploy/namespaces
+    targetRevision: HEAD
+    directory:
+      recurse: true
+      jsonnet: {}
+  destination:
+    server: 'https://34.107.22.41'
+    namespace: microservices-demo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+```
+
+```console
+ka apps/microservices-demo.yaml
+application.argoproj.io/microservices-demo created
+```
+
+Смотрим, что argocd отработал:
+```console
+kg namespace microservices-demo --show-labels
+NAME                 STATUS   AGE     LABELS
+microservices-demo   Active   2m55s   argocd.argoproj.io/instance=microservices-demo,istio-injection=enabled
+```
+
+Прекрасно, все что попадет в microservices-demo будет istio-injection=enabled
+
+
+- Теперь нам нужно натравить argo-cd на наши чарты + argocd-image-updater
+
+frontend.yaml
+
+```yml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: docker.io/chudinanton/frontend:^v0.0
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/creds-3496798157
+  name: frontend
+  namespace: argocd
+spec:
+  destination:
+    namespace: microservices-demo
+    server: https://34.107.22.41
+  project: default
+  source:
+    helm:
+      valueFiles:
+      - values.yaml
+    path: deploy/charts/frontend
+    repoURL: https://gitlab.com/chudinanton108/microservices-demo-argocd.git
+    targetRevision: HEAD
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+```
+
+Магия :)
+
+По-аналогии создадим другие App в argocd и применим их:
+
+```console
+ka apps/
+application.argoproj.io/adservice created
+application.argoproj.io/cartservice created
+application.argoproj.io/checkoutservice created
+application.argoproj.io/currencyservice created
+application.argoproj.io/emailservice created
+application.argoproj.io/frontend unchanged
+application.argoproj.io/loadgenerator created
+application.argoproj.io/microservices-demo unchanged
+application.argoproj.io/paymentservice created
+application.argoproj.io/productcatalogservice created
+application.argoproj.io/recommendationservice created
+application.argoproj.io/shippingservice created
+```
+
+
+Все файлы по argocd лежат в kubernetes-gitops/argocd
+
+Репозиторий в который смотрит argocd
+
+https://gitlab.com/chudinanton108/microservices-demo-argocd
+
+
+![argo.png](kubernetes-gitops/images/argo.png)
+
+На мой взгляд, репа с чартами должна лежать отдельно. И argocd должен видеть обновление в реджестри без изенений этой репы, как это делает Flux.
+
+Обновляем образ frontend, дожидаемся прохождения pipeline:
+
+https://gitlab.com/polyrepo-microservices-demo/frontend/-/pipelines/385789785
+
+Логи можно смотреть в argocd-image-updater поде
+```console
+time="2021-10-10T22:04:09Z" level=info msg="Setting new image to docker.io/chudinanton/frontend:v0.0.17" alias= application=frontend image_name=chudinanton/frontend image_tag=v0.0.15 registry=docker.io
+time="2021-10-10T22:04:09Z" level=info msg="Successfully updated image 'docker.io/chudinanton/frontend:v0.0.15' to 'docker.io/chudinanton/frontend:v0.0.17', but pending spec update (dry run=false)" alias= application=frontend image_name=chudinanton/frontend image_tag=v0.0.15 registry=docker.io
+time="2021-10-10T22:04:09Z" level=info msg="Committing 0 parameter update(s) for application frontend" application=frontend
+time="2021-10-10T22:04:09Z" level=info msg="Initializing https://gitlab.com/chudinanton108/microservices-demo-argocd.git to /tmp/git-frontend567586645"
+time="2021-10-10T22:04:09Z" level=info msg="rm -rf /tmp/git-frontend567586645" dir= execID=I1DHG
+time="2021-10-10T22:04:09Z" level=info msg=Trace args="[rm -rf /tmp/git-frontend567586645]" dir= operation_name="exec rm" time_ms=62.366492
+time="2021-10-10T22:04:09Z" level=info msg="git fetch origin --tags --force" dir=/tmp/git-frontend567586645 execID=St5lO
+time="2021-10-10T22:04:10Z" level=info msg=Trace args="[git fetch origin --tags --force]" dir=/tmp/git-frontend567586645 operation_name="exec git" time_ms=817.3705060000001
+time="2021-10-10T22:04:10Z" level=info msg="git config user.name argocd-image-updater" dir=/tmp/git-frontend567586645 execID=q9ygU
+time="2021-10-10T22:04:10Z" level=info msg=Trace args="[git config user.name argocd-image-updater]" dir=/tmp/git-frontend567586645 operation_name="exec git" time_ms=1.796762
+time="2021-10-10T22:04:10Z" level=info msg="git config user.email noreply@argoproj.io" dir=/tmp/git-frontend567586645 execID=srX4s
+time="2021-10-10T22:04:10Z" level=info msg=Trace args="[git config user.email noreply@argoproj.io]" dir=/tmp/git-frontend567586645 operation_name="exec git" time_ms=2.0906610000000003
+time="2021-10-10T22:04:10Z" level=info msg="git symbolic-ref HEAD" dir=/tmp/git-frontend567586645 execID=d0OYY
+time="2021-10-10T22:04:10Z" level=info msg="resolved remote default branch to 'master' and using that for operations"
+time="2021-10-10T22:04:10Z" level=info msg=Trace args="[git symbolic-ref HEAD]" dir=/tmp/git-frontend567586645 operation_name="exec git" time_ms=1.7561630000000001
+time="2021-10-10T22:04:10Z" level=info msg="git checkout --force master" dir=/tmp/git-frontend567586645 execID=hHRY0
+time="2021-10-10T22:04:10Z" level=info msg=Trace args="[git checkout --force master]" dir=/tmp/git-frontend567586645 operation_name="exec git" time_ms=13.582679
+time="2021-10-10T22:04:10Z" level=info msg="git clean -fdx" dir=/tmp/git-frontend567586645 execID=wlCWI
+time="2021-10-10T22:04:10Z" level=info msg=Trace args="[git clean -fdx]" dir=/tmp/git-frontend567586645 operation_name="exec git" time_ms=2.752965
+time="2021-10-10T22:04:10Z" level=info msg="git add /tmp/git-frontend567586645/deploy/charts/frontend/.argocd-source-frontend.yaml" dir=/tmp/git-frontend567586645 execID=xpHww
+time="2021-10-10T22:04:10Z" level=info msg=Trace args="[git add /tmp/git-frontend567586645/deploy/charts/frontend/.argocd-source-frontend.yaml]" dir=/tmp/git-frontend567586645 operation_name="exec git" time_ms=4.047263
+time="2021-10-10T22:04:10Z" level=info msg="git commit -a -F /tmp/image-updater-commit-msg052572336" dir=/tmp/git-frontend567586645 execID=AnN6H
+time="2021-10-10T22:04:10Z" level=info msg=Trace args="[git commit -a -F /tmp/image-updater-commit-msg052572336]" dir=/tmp/git-frontend567586645 operation_name="exec git" time_ms=14.724438
+time="2021-10-10T22:04:10Z" level=info msg="git push origin master" dir=/tmp/git-frontend567586645 execID=KkxwB
+```
+
+Идем в нашу репу и смотрим, на изменения:
+
+![microservices-demo-argocd](kubernetes-gitops/images/microservices-demo-argocd.png)
+
+Ну и в сам argocd UI:
+
+![argocd-updating](kubernetes-gitops/images/argocd-updating.png)
+
+Задача выполнена!
+
+TODO: Canary and Vault (for Secrets)
+
+</details>
+</details>
+
+<details>
 <summary> <b>ДЗ №10 - kubernetes-vault (Хранилище секретов для приложений. Vault )</b></summary>
 
 - [x] Основное ДЗ
