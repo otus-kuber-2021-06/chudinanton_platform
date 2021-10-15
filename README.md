@@ -1,6 +1,1263 @@
 # chudinanton_platform
 chudinanton Platform repository
 <details>
+<summary> <b>ДЗ №12 - kubernetes-storage (Подсистемы хранения данных в Kubernetes 
+)</b></summary>
+
+- [x] Основное ДЗ
+
+- [x] Дополнительное задание *
+
+<details>
+<summary> <b>Установить CSI-драйвер и протестировать функционал снапшотов</b></summary>
+
+- Развернем кластер через minikube
+
+```console
+minikube start --driver=docker --kubernetes-version=v1.21.3
+```
+
+Протестируем CSI на примере host-path:
+
+https://github.com/kubernetes-csi/csi-driver-host-path
+
+Документация:
+
+- https://github.com/kubernetes-csi/csi-driver-host-path/tree/master/docs
+
+- https://github.com/kubernetes-csi/external-snapshotter
+
+Выполним следующие команды, чтобы убедиться, что CRD-файлы VolumeSnapshot не установлены:
+
+```console
+kubectl get volumesnapshotclasses.snapshot.storage.k8s.io
+error: the server doesn't have a resource type "volumesnapshotclasses"
+(minikube # ) antonchudin@mir ~/otus/k8s_06/chudinanton_platform# kubectl get volumesnapshots.snapshot.storage.k8s.io
+error: the server doesn't have a resource type "volumesnapshots"
+(minikube # ) antonchudin@mir ~/otus/k8s_06/chudinanton_platform# kubectl get volumesnapshotcontents.snapshot.storage.k8s.io
+error: the server doesn't have a resource type "volumesnapshotcontents"
+```
+
+Затем проверим, не запущены ли какие-либо поды образ контроллера моментальных снимков:
+
+```console
+kubectl get pods --all-namespaces -o=jsonpath='{range .items[*]}{"\n"}{range .spec.containers[*]}{.image}{", "}{end}{end}' | grep snapshot-controller
+```
+
+Посмотрим на external-snapshotter:
+
+```console
+
+git clone git@github.com:kubernetes-csi/external-snapshotter.git
+cd external-snapshotter
+ka deploy/kubernetes/csi-snapshotter
+ka deploy/kubernetes/snapshot-controller
+kubectl create -f client/config/crd
+customresourcedefinition.apiextensions.k8s.io/volumesnapshotclasses.snapshot.storage.k8s.io created
+customresourcedefinition.apiextensions.k8s.io/volumesnapshotcontents.snapshot.storage.k8s.io created
+customresourcedefinition.apiextensions.k8s.io/volumesnapshots.snapshot.storage.k8s.io created
+
+kubectl get pods --all-namespaces -o=jsonpath='{range .items[*]}{"\n"}{range .spec.containers[*]}{.image}{", "}{end}{end}' | grep snapshot-controller
+k8s.gcr.io/sig-storage/snapshot-controller:v4.2.1, 
+k8s.gcr.io/sig-storage/snapshot-controller:v4.2.1
+```
+
+Ставим СSI:
+
+```console
+git clone git@github.com:kubernetes-csi/csi-driver-host-path.git
+cd ../csi-driver-host-path/
+./deploy/kubernetes-1.21/deploy.sh
+
+```
+
+Смотрим на поды:
+
+```console
+kubectl get pods
+NAME                   READY   STATUS    RESTARTS   AGE
+csi-hostpath-socat-0   1/1     Running   0          44s
+csi-hostpathplugin-0   8/8     Running   0          48s
+csi-snapshotter-0      3/3     Running   0          9m47s
+```
+
+Копируем из example нужные yaml и применяем их
+
+```console
+cd ../hw 
+ka hw
+pod/storage-pod created
+persistentvolumeclaim/storage-pvc created
+storageclass.storage.k8s.io/csi-hostpath-sc created
+
+kg po,pv,pvc
+NAME                       READY   STATUS    RESTARTS   AGE
+pod/csi-hostpath-socat-0   1/1     Running   0          41m
+pod/csi-hostpathplugin-0   8/8     Running   0          41m
+pod/csi-snapshotter-0      3/3     Running   0          50m
+pod/storage-pod            1/1     Running   0          17s
+
+NAME                                                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS      REASON   AGE
+persistentvolume/pvc-77620001-b18b-42c0-aa40-5af6a785f17d   1Gi        RWO            Delete           Bound    default/storage-pvc   csi-hostpath-sc            14s
+
+NAME                                STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS      AGE
+persistentvolumeclaim/storage-pvc   Bound    pvc-77620001-b18b-42c0-aa40-5af6a785f17d   1Gi        RWO            csi-hostpath-sc   16s
+```
+
+Создался тестовый под с pvc
+
+Finally, inspect the application pod my-csi-app which mounts a Hostpath volume:
+
+```console
+kubectl describe pods/storage-pod
+Name:         storage-pod
+Namespace:    default
+Priority:     0
+Node:         minikube/192.168.49.2
+Start Time:   Mon, 11 Oct 2021 12:36:57 +0300
+Labels:       <none>
+Annotations:  <none>
+Status:       Running
+IP:           172.17.0.8
+IPs:
+  IP:  172.17.0.8
+Containers:
+  my-frontend:
+    Container ID:  docker://f1d326e8259e192f9a8a674988c044f64492f420a5c1681f01b0d73d25107e7f
+    Image:         busybox
+    Image ID:      docker-pullable://busybox@sha256:f7ca5a32c10d51aeda3b4d01c61c6061f497893d7f6628b92f822f7117182a57
+    Port:          <none>
+    Host Port:     <none>
+    Command:
+      sleep
+      1000000
+    State:          Running
+      Started:      Mon, 11 Oct 2021 12:37:07 +0300
+    Ready:          True
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /data from storage-pvc (rw)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-kwh8n (ro)
+Conditions:
+  Type              Status
+  Initialized       True 
+  Ready             True 
+  ContainersReady   True 
+  PodScheduled      True 
+Volumes:
+  storage-pvc:
+    Type:       PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
+    ClaimName:  storage-pvc
+    ReadOnly:   false
+  kube-api-access-kwh8n:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    ConfigMapOptional:       <nil>
+    DownwardAPI:             true
+QoS Class:                   BestEffort
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason                  Age   From                     Message
+  ----     ------                  ----  ----                     -------
+  Warning  FailedScheduling        44s   default-scheduler        0/1 nodes are available: 1 persistentvolumeclaim "storage-pvc" not found.
+  Warning  FailedScheduling        42s   default-scheduler        0/1 nodes are available: 1 pod has unbound immediate PersistentVolumeClaims.
+  Normal   Scheduled               40s   default-scheduler        Successfully assigned default/storage-pod to minikube
+  Normal   SuccessfulAttachVolume  39s   attachdetach-controller  AttachVolume.Attach succeeded for volume "pvc-77620001-b18b-42c0-aa40-5af6a785f17d"
+  Normal   Pulling                 32s   kubelet                  Pulling image "busybox"
+  Normal   Pulled                  30s   kubelet                  Successfully pulled image "busybox" in 1.819717004s
+  Normal   Created                 30s   kubelet                  Created container my-frontend
+  Normal   Started                 30s   kubelet                  Started container my-frontend
+```
+
+Confirm the creation of the VolumeAttachment object
+
+```console
+kubectl describe volumeattachment
+Name:         csi-cea0db9a1f3c58087f30fc26cfb6714a262a955eaa2c0d8a0d47cfa0d930d915
+Namespace:    
+Labels:       <none>
+Annotations:  <none>
+API Version:  storage.k8s.io/v1
+Kind:         VolumeAttachment
+Metadata:
+  Creation Timestamp:  2021-10-11T09:36:57Z
+  Managed Fields:
+    API Version:  storage.k8s.io/v1
+    Fields Type:  FieldsV1
+    fieldsV1:
+      f:status:
+        f:attached:
+    Manager:      csi-attacher
+    Operation:    Update
+    Time:         2021-10-11T09:36:57Z
+    API Version:  storage.k8s.io/v1
+    Fields Type:  FieldsV1
+    fieldsV1:
+      f:spec:
+        f:attacher:
+        f:nodeName:
+        f:source:
+          f:persistentVolumeName:
+    Manager:         kube-controller-manager
+    Operation:       Update
+    Time:            2021-10-11T09:36:57Z
+  Resource Version:  5971
+  UID:               caff448f-0199-4ac5-9a2b-877c131c88d0
+Spec:
+  Attacher:   hostpath.csi.k8s.io
+  Node Name:  minikube
+  Source:
+    Persistent Volume Name:  pvc-77620001-b18b-42c0-aa40-5af6a785f17d
+Status:
+  Attached:  true
+Events:      <none>
+```
+
+## Тестирование снапшотов.
+
+Создадим несколько файлов:
+
+```console
+kubectl exec storage-pod -it -- /bin/sh
+/ # touch /data/hello-world
+/ # touch /data/hello-world2
+/ # touch /data/hello-world3
+/ # ls -hal /data/
+total 8K     
+drwxr-xr-x    2 root     root        4.0K Oct 11 09:46 .
+drwxr-xr-x    1 root     root        4.0K Oct 11 09:37 ..
+-rw-r--r--    1 root     root           0 Oct 11 09:46 hello-world
+-rw-r--r--    1 root     root           0 Oct 11 09:45 hello-world2
+-rw-r--r--    1 root     root           0 Oct 11 09:45 hello-world3
+```
+
+Выполним снапшот (берем из example меняя имя PVC, и убираем beta, снапшоты завезли в GA)
+
+https://kubernetes.io/blog/2020/12/10/kubernetes-1.20-volume-snapshot-moves-to-ga/
+
+Дока:
+
+https://github.com/kubernetes-csi/csi-driver-host-path/blob/master/docs/example-snapshots-1.17-and-later.md
+
+```console
+kubectl get volumesnapshotclass
+NAME                     DRIVER                DELETIONPOLICY   AGE
+csi-hostpath-snapclass   hostpath.csi.k8s.io   Delete           56m
+
+ka hw/csi-snapshot-v1.yaml
+volumesnapshot.snapshot.storage.k8s.io/new-snapshot-demo created
+
+kubectl get volumesnapshot
+NAME                READYTOUSE   SOURCEPVC     SOURCESNAPSHOTCONTENT   RESTORESIZE   SNAPSHOTCLASS            SNAPSHOTCONTENT                                    CREATIONTIME   AGE
+new-snapshot-demo   true         storage-pvc                           1Gi           csi-hostpath-snapclass   snapcontent-353ef520-552e-44a9-a026-8b890c683c07   5m38s          5m38s
+
+
+kubectl get volumesnapshotcontent
+NAME                                               READYTOUSE   RESTORESIZE   DELETIONPOLICY   DRIVER                VOLUMESNAPSHOTCLASS      VOLUMESNAPSHOT      VOLUMESNAPSHOTNAMESPACE   AGE
+snapcontent-353ef520-552e-44a9-a026-8b890c683c07   true         1073741824    Delete           hostpath.csi.k8s.io   csi-hostpath-snapclass   new-snapshot-demo   default                   5m54s
+```
+
+```console
+kubectl describe volumesnapshot                                                                            ✹ ✭kubernetes-storage 
+Name:         new-snapshot-demo
+Namespace:    default
+Labels:       <none>
+Annotations:  <none>
+API Version:  snapshot.storage.k8s.io/v1
+Kind:         VolumeSnapshot
+Metadata:
+  Creation Timestamp:  2021-10-11T09:47:45Z
+  Finalizers:
+    snapshot.storage.kubernetes.io/volumesnapshot-as-source-protection
+    snapshot.storage.kubernetes.io/volumesnapshot-bound-protection
+  Generation:  1
+  Managed Fields:
+    API Version:  snapshot.storage.k8s.io/v1
+    Fields Type:  FieldsV1
+    fieldsV1:
+      f:metadata:
+        f:annotations:
+          .:
+          f:kubectl.kubernetes.io/last-applied-configuration:
+      f:spec:
+        .:
+        f:source:
+          .:
+          f:persistentVolumeClaimName:
+        f:volumeSnapshotClassName:
+    Manager:      kubectl-client-side-apply
+    Operation:    Update
+    Time:         2021-10-11T09:47:45Z
+    API Version:  snapshot.storage.k8s.io/v1
+    Fields Type:  FieldsV1
+    fieldsV1:
+      f:metadata:
+        f:finalizers:
+          .:
+          v:"snapshot.storage.kubernetes.io/volumesnapshot-as-source-protection":
+          v:"snapshot.storage.kubernetes.io/volumesnapshot-bound-protection":
+      f:status:
+        .:
+        f:boundVolumeSnapshotContentName:
+        f:creationTime:
+        f:readyToUse:
+        f:restoreSize:
+    Manager:         snapshot-controller
+    Operation:       Update
+    Time:            2021-10-11T09:47:46Z
+  Resource Version:  6793
+  UID:               353ef520-552e-44a9-a026-8b890c683c07
+Spec:
+  Source:
+    Persistent Volume Claim Name:  storage-pvc
+  Volume Snapshot Class Name:      csi-hostpath-snapclass
+Status:
+  Bound Volume Snapshot Content Name:  snapcontent-353ef520-552e-44a9-a026-8b890c683c07
+  Creation Time:                       2021-10-11T09:47:45Z
+  Ready To Use:                        true
+  Restore Size:                        1Gi
+Events:
+  Type    Reason            Age    From                 Message
+  ----    ------            ----   ----                 -------
+  Normal  CreatingSnapshot  6m13s  snapshot-controller  Waiting for a snapshot default/new-snapshot-demo to be created by the CSI driver.
+  Normal  SnapshotCreated   6m12s  snapshot-controller  Snapshot default/new-snapshot-demo was successfully created by the CSI driver.
+  Normal  SnapshotReady     6m12s  snapshot-controller  Snapshot default/new-snapshot-demo is ready to use.
+```
+
+Удалим приложение и pvc:
+
+```console
+k delete -f hw/csi-app.yaml
+pod "storage-pod" deleted
+k delete -f hw/csi-pvc.yaml
+persistentvolumeclaim "storage-pvc" deleted
+kg po,pv,pvc
+NAME                       READY   STATUS    RESTARTS   AGE
+pod/csi-hostpath-socat-0   1/1     Running   0          62m
+pod/csi-hostpathplugin-0   8/8     Running   0          62m
+pod/csi-snapshotter-0      3/3     Running   0          71m
+```
+
+Помним про reclaim-policy
+
+https://kubernetes.io/docs/concepts/storage/storage-classes/#reclaim-policy
+
+Вновь берем из example нужно манифест:
+
+```console
+ka hw/csi-restore.yaml
+persistentvolumeclaim/storage-pvc created
+```
+
+Смотрим, что восстановилось:
+
+```console
+kg po,pv,pvc                                                                                               ✹ ✭kubernetes-storage 
+NAME                       READY   STATUS    RESTARTS   AGE
+pod/csi-hostpath-socat-0   1/1     Running   0          64m
+pod/csi-hostpathplugin-0   8/8     Running   0          64m
+pod/csi-snapshotter-0      3/3     Running   0          73m
+
+NAME                                                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS      REASON   AGE
+persistentvolume/pvc-1ad8eb9c-0983-4499-a348-bdd6e67f1716   1Gi        RWO            Delete           Bound    default/storage-pvc   csi-hostpath-sc            27s
+
+NAME                                STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS      AGE
+persistentvolumeclaim/storage-pvc   Bound    pvc-1ad8eb9c-0983-4499-a348-bdd6e67f1716   1Gi        RWO            csi-hostpath-sc   27s
+```
+
+Пода пока нет, и это логично. Зато есть pv, pvc
+
+Поднимаем под:
+
+```console
+ka hw/csi-app.yaml
+```
+
+Чекаем файлы:
+
+```console
+kubectl exec storage-pod -it -- /bin/sh
+#ls -hal /data/
+total 8K     
+drwxr-xr-x    2 root     root        4.0K Oct 11 10:00 .
+drwxr-xr-x    1 root     root        4.0K Oct 11 10:02 ..
+-rw-r--r--    1 root     root           0 Oct 11 09:46 hello-world
+-rw-r--r--    1 root     root           0 Oct 11 09:45 hello-world2
+-rw-r--r--    1 root     root           0 Oct 11 09:45 hello-world3
+```
+
+Все на месте!
+
+</details>
+
+
+<details>
+<summary> <b>Развернуть k8s-кластер, к которому добавить хранилище на iSCSI | Задание со ⭐  </b></summary>
+
+Что нужно сделать?
+
+- Развернуть кластер на одной или нескольких виртуалках
+- Всем добавить еще одну виртуальную сеть, для хранилища
+- На одной дополнительной виртуалке развернуть iSCSI-таргет
+- Пробросить ее в виртуальную сеть хранилища
+
+Что нужно установить на машине с iSCSI?
+
+- Сама функциональность iSCSI реализуется модулем ядра
+- Но мы не можем с ним напрямую пообщаться
+- Поэтому нужно установить утилиту для общения с этим модулем и восстановлением конфигурации iSCSI при загрузке (targetcli, например)
+
+Дока по ISCSI:
+
+https://github.com/kubernetes/examples/tree/master/volumes/iscsi
+
+
+Я буду делать хранилку на  Centos 8
+
+Кластер развернут через kubespray в кластере vmware
+
+Добавляем на 3 ноды по доп. адаптеру с выделенной по iscsi сетью (по-хорошему и на коммутаторе и на серверах нужен MTU 9000):
+
+
+
+Ставим и запускаем targetcli
+
+```console
+dnf install targetcli -y
+systemctl enable target --now
+```
+
+Добавляем диск:
+
+```console
+fdisk -l | grep sd
+pvcreate /dev/sdc
+  Physical volume "/dev/sdc" successfully created.
+vgcreate vg-iscsi /dev/sdc
+  Volume group "vg-iscsi" successfully created
+lvcreate -n lv-iscsi -l 100%FREE vg-iscsi
+  Logical volume "lv-iscsi" created.
+```
+
+Диск мы не форматируем.
+
+https://github.com/open-iscsi/targetd
+
+
+```console
+vi /etc/target/targetd.yaml
+
+user: "iscsi" # strings quoted, or not
+password: iScsI7-pa$$w0Rd9
+ssl: false
+target_name: 
+
+pool_name: /dev/vg-iscsi/lv-iscsi
+```
+
+```console
+root@co-bgd-kub-iscsi /etc# firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.9.11" port port=3260 protocol="tcp" accept'
+success
+root@co-bgd-kub-iscsi /etc# firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.9.12" port port=3260 protocol="tcp" accept'
+success
+root@co-bgd-kub-iscsi /etc# firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.9.13" port port=3260 protocol="tcp" accept'
+success
+firewall-cmd --reload
+exit
+systemctl restart targetd
+```
+
+targetcli                                                                                                                               130 ↵
+targetcli shell version 2.1.53
+Copyright 2011-2013 by Datera, Inc and others.
+For help on commands, type 'help'.
+
+/> ls
+o- / ......................................................................................................................... [...]
+  o- backstores .............................................................................................................. [...]
+  | o- block .................................................................................................. [Storage Objects: 0]
+  | o- fileio ................................................................................................. [Storage Objects: 0]
+  | o- pscsi .................................................................................................. [Storage Objects: 0]
+  | o- ramdisk ................................................................................................ [Storage Objects: 0]
+  o- iscsi ............................................................................................................ [Targets: 0]
+  o- loopback ......................................................................................................... [Targets: 0]
+/> /backstores/block create lun-0 /dev/vg-iscsi/lv-iscsi
+Created block storage object lun-0 using /dev/vg-iscsi/lv-iscsi.
+
+/iscsi create iqn.2021-10.su.yogatour.k8s:storage-test
+Created target iqn.2021-10.su.yogatour.k8s:storage-test.
+Created TPG 1.
+Global pref auto_add_default_portal=true
+Created default portal listening on all IPs (0.0.0.0), port 3260.
+
+
+/iscsi/iqn.2021-10.su.yogatour.k8s:storage-test/tpg1/luns create /backstores/block/lun-0
+Created LUN 0.
+
+/>                                                   
+
+Лун создан. Теперь надо решить вопрос с безопасностью:
+
+```console
+/> /iscsi/iqn.2021-10.su.yogatour.k8s:storage-test/tpg1/acls create iqn.2021-10.su.yogatour.k8s:node-1
+Created Node ACL for iqn.2021-10.su.yogatour.k8s:node-1
+Created mapped LUN 0.
+/> /iscsi/iqn.2021-10.su.yogatour.k8s:storage-test/tpg1/acls create iqn.2021-10.su.yogatour.k8s:node-2
+Created Node ACL for iqn.2021-10.su.yogatour.k8s:node-2
+Created mapped LUN 0.
+/> /iscsi/iqn.2021-10.su.yogatour.k8s:storage-test/tpg1/acls create iqn.2021-10.su.yogatour.k8s:node-3
+Created Node ACL for iqn.2021-10.su.yogatour.k8s:node-3
+Created mapped LUN 0.
+
+/> /iscsi/iqn.2021-10.su.yogatour.k8s:storage-test/tpg1/ set parameter AuthMethod=None
+Parameter AuthMethod is now 'None'.
+
+/> /iscsi/iqn.2021-10.su.yogatour.k8s:storage-test/tpg1/ set attribute authentication=0
+Parameter authentication is now '0'.
+```
+
+Для тестирования нам хватит такой защиты.
+
+
+## iscsi-initiator-utils
+
+```console
+3 x dnf install -y iscsi-initiator-utils
+3 x cat /etc/iscsi/initiatorname.iscsi
+InitiatorName=iqn.2021-10.su.yogatour.k8s:node-{1,2,3}
+
+#InitiatorName=iqn.1994-05.com.redhat:40816b75ae44
+systemctl enable iscsid --now
+```
+
+Тестирование доступа:
+
+```console
+root@co-bgd-kub-node-1 ~# iscsiadm -m discovery -t sendtargets -p 192.168.9.10
+192.168.9.10:3260,1 iqn.2021-10.su.yogatour.k8s:storage-test
+root@co-bgd-kub-node-2 ~# iscsiadm -m discovery -t sendtargets -p 192.168.9.10
+192.168.9.10:3260,1 iqn.2021-10.su.yogatour.k8s:storage-test
+root@co-bgd-kub-node-3 ~# iscsiadm -m discovery -t sendtargets -p 192.168.9.10
+192.168.9.10:3260,1 iqn.2021-10.su.yogatour.k8s:storage-test
+
+iscsiadm -m node --login
+Logging in to [iface: default, target: iqn.2021-10.su.yogatour.k8s:storage-test, portal: 192.168.9.10,3260]
+Login to [iface: default, target: iqn.2021-10.su.yogatour.k8s:storage-test, portal: 192.168.9.10,3260] successful.
+
+iscsiadm -m node --logout
+Logging out of session [sid: 1, target: iqn.2021-10.su.yogatour.k8s:storage-test, portal: 192.168.9.10,3260]
+Logout of [sid: 1, target: iqn.2021-10.su.yogatour.k8s:storage-test, portal: 192.168.9.10,3260] successful.
+```
+
+Можно пробовать.
+
+```console
+ka iscsi/iscsi-pv.yaml
+kg pv,pvc
+NAME                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM   STORAGECLASS   REASON   AGE
+persistentvolume/iscsi-pv   10Gi       RWO            Retain           Available                                   88s
+
+k describe persistentvolume/iscsi-pv
+Name:            iscsi-pv
+Labels:          <none>
+Annotations:     <none>
+Finalizers:      [kubernetes.io/pv-protection]
+StorageClass:    
+Status:          Available
+Claim:           
+Reclaim Policy:  Retain
+Access Modes:    RWO
+VolumeMode:      Filesystem
+Capacity:        10Gi
+Node Affinity:   <none>
+Message:         
+Source:
+    Type:               ISCSI (an ISCSI Disk resource that is attached to a kubelet's host machine and then exposed to the pod)
+    TargetPortal:       192.168.9.10
+    IQN:                iqn.2021-10.su.yogatour.k8s:storage-test
+    Lun:                0
+    ISCSIInterface      default
+    FSType:             xfs
+    ReadOnly:           false
+    Portals:            []
+    DiscoveryCHAPAuth:  false
+    SessionCHAPAuth:    false
+    SecretRef:          nil
+    InitiatorName:      <none>
+Events:                 <none>
+```
+
+```console
+ka iscsi/iscsi-pvc.yaml
+persistentvolumeclaim/iscsi-pvc-iscsi-app created
+NAME                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                         STORAGECLASS   REASON   AGE
+persistentvolume/iscsi-pv   10Gi       RWO            Retain           Bound    default/iscsi-pvc-iscsi-app                           7m59s
+
+NAME                                        STATUS   VOLUME     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+persistentvolumeclaim/iscsi-pvc-iscsi-app   Bound    iscsi-pv   10Gi       RWO                           39
+
+k describe persistentvolumeclaim/iscsi-pvc-iscsi-app
+Name:          iscsi-pvc-iscsi-app
+Namespace:     default
+StorageClass:  
+Status:        Bound
+Volume:        iscsi-pv
+Labels:        <none>
+Annotations:   pv.kubernetes.io/bind-completed: yes
+               pv.kubernetes.io/bound-by-controller: yes
+Finalizers:    [kubernetes.io/pvc-protection]
+Capacity:      10Gi
+Access Modes:  RWO
+VolumeMode:    Filesystem
+Mounted By:    <none>
+Events:        <none>
+```
+
+Раскатываем наш тестовый под меняя в нем соответствующие значения pvc
+
+```console
+ka iscsi/iscsi-app.yaml
+pod/iscsi-app created
+```
+
+Посмотрим на то, что получилось повнимательнее:
+
+```console
+k describe pod iscsi-app
+
+Name:         iscsi-app
+Namespace:    default
+Priority:     0
+Node:         co-bgd-kub-node-2/10.5.10.56
+Start Time:   Wed, 13 Oct 2021 17:20:16 +0300
+Labels:       <none>
+Annotations:  cni.projectcalico.org/containerID: 63dce2d8935088675664e793e528f03704dba89006444a1193c2751c83691443
+              cni.projectcalico.org/podIP: 10.233.81.6/32
+              cni.projectcalico.org/podIPs: 10.233.81.6/32
+Status:       Running
+IP:           10.233.81.6
+IPs:
+  IP:  10.233.81.6
+Containers:
+  my-frontend:
+    Container ID:  containerd://9a18a01de32a50dafb112bc75d0594d11989d8611a4d8806c0376bd90e7a9f7c
+    Image:         busybox
+    Image ID:      docker.io/library/busybox@sha256:f7ca5a32c10d51aeda3b4d01c61c6061f497893d7f6628b92f822f7117182a57
+    Port:          <none>
+    Host Port:     <none>
+    Command:
+      sleep
+      1000000
+    State:          Running
+      Started:      Wed, 13 Oct 2021 17:20:34 +0300
+    Ready:          True
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /data from storage-pvc (rw)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-fmz5s (ro)
+Conditions:
+  Type              Status
+  Initialized       True 
+  Ready             True 
+  ContainersReady   True 
+  PodScheduled      True 
+Volumes:
+  storage-pvc:
+    Type:       PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
+    ClaimName:  iscsi-pvc-iscsi-app
+    ReadOnly:   false
+  kube-api-access-fmz5s:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    ConfigMapOptional:       <nil>
+    DownwardAPI:             true
+QoS Class:                   BestEffort
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type    Reason                  Age   From                     Message
+  ----    ------                  ----  ----                     -------
+  Normal  Scheduled               55s   default-scheduler        Successfully assigned default/iscsi-app to co-bgd-kub-node-2
+  Normal  SuccessfulAttachVolume  55s   attachdetach-controller  AttachVolume.Attach succeeded for volume "iscsi-pv"
+  Normal  Pulling                 40s   kubelet                  Pulling image "busybox"
+  Normal  Pulled                  37s   kubelet                  Successfully pulled image "busybox" in 3.439533181s
+  Normal  Created                 37s   kubelet                  Created container my-frontend
+  Normal  Started                 37s   kubelet                  Started container my-frontend
+```
+
+pvc примаплен!
+
+По условиям задания нам надо:
+
+- Создать данные в директории, которая смотрит в этот LUN
+- Сделать снапшот в LVM
+- Грохнуть данные
+- Убить Pod, PVC, PV
+- Вытащить Logical Volume из iSCSI, сделать merge снапшота, снова
+- закинуть в iSCSI
+- Проверить, что всё на месте
+
+Насколько кооректно подавать 1 LVM целиком в лун большой вопрос. Как по мне лучше подать VG и пусть кубер создает внутри него LVM. Удобнее снапшотить.
+
+- Создать данные в директории, которая смотрит в этот LUN
+
+```console
+kubectl exec iscsi-app -it -- /bin/sh
+/ # df -h
+Filesystem                Size      Used Available Use% Mounted on
+overlay                  15.0G      2.4G     12.6G  16% /
+tmpfs                    64.0M         0     64.0M   0% /dev
+tmpfs                     1.8G         0      1.8G   0% /sys/fs/cgroup
+/dev/sdd                 99.9G    745.8M     99.2G   1% /data
+/dev/mapper/vglib-lvlib
+                         15.0G      2.4G     12.6G  16% /etc/hosts
+/dev/mapper/vglib-lvlib
+                         15.0G      2.4G     12.6G  16% /dev/termination-log
+/dev/mapper/vglib-lvlib
+                         15.0G      2.4G     12.6G  16% /etc/hostname
+/dev/mapper/vglib-lvlib
+                         15.0G      2.4G     12.6G  16% /etc/resolv.conf
+shm                      64.0M         0     64.0M   0% /dev/shm
+tmpfs                     1.8G     12.0K      1.8G   0% /var/run/secrets/kubernetes.io/serviceaccount
+tmpfs                     1.8G         0      1.8G   0% /proc/acpi
+tmpfs                    64.0M         0     64.0M   0% /proc/kcore
+tmpfs                    64.0M         0     64.0M   0% /proc/keys
+tmpfs                    64.0M         0     64.0M   0% /proc/timer_list
+tmpfs                    64.0M         0     64.0M   0% /proc/sched_debug
+tmpfs                     1.8G         0      1.8G   0% /proc/scsi
+tmpfs                     1.8G         0      1.8G   0% /sys/firmware
+
+```
+
+```console
+#touch /data/hello-world
+#touch /data/hello-world2
+#touch /data/hello-world3
+# ls -hal /data/
+total 0      
+drwxr-xr-x    2 root     root          65 Oct 15 11:50 .
+drwxr-xr-x    1 root     root          75 Oct 15 11:49 ..
+-rw-r--r--    1 root     root           0 Oct 15 11:50 hello-world
+-rw-r--r--    1 root     root           0 Oct 15 11:50 hello-world2
+-rw-r--r--    1 root     root           0 Oct 15 11:50 hello-world3
+
+```
+
+- Сделать снапшот в LVM
+
+https://it-lux.ru/lvm-snapshot/
+
+Я не предусмотрел свободного пространства под снапшот. Исправляем
+
+```console
+echo '1' >> /sys/class/scsi_disk/0:0:2:0/device/rescan
+
+root@co-bgd-kub-iscsi /etc# fdisk -l | grep sd
+Диск /dev/sda: 22 GiB, 23622320128 байт, 46137344 секторов
+/dev/sda1  *              2048  2099199  2097152     1G            83 Linux
+/dev/sda2              2099200 46137343 44038144    21G            8e Linux LVM
+Диск /dev/sdb: 15 GiB, 16106127360 байт, 31457280 секторов
+Диск /dev/sdc: 130 GiB, 139586437120 байт, 272629760 секторов
+
+pvresize /dev/sdc
+  Physical volume "/dev/sdc" changed
+  1 physical volume(s) resized or updated / 0 physical volume(s) not resized
+
+vgs                                                                                                                                       5 ↵
+  VG       #PV #LV #SN Attr   VSize    VFree
+  cl         1   2   0 wz--n-  <21,00g     0
+  vg-iscsi   1   1   0 wz--n- <130,00g 30,00g
+  vg-logs    1   1   0 wz--n-  <15,00g     0
+
+```
+
+Делаем снапшот:
+
+```console
+lvcreate -L 10G -s -n snap_vg-iscsi_21.10.13 /dev/mapper/vg--iscsi-lv--iscsi                                                              3 ↵
+  Logical volume "snap_vg-iscsi_21.10.13" created.
+
+lvs
+  LV                     VG       Attr       LSize    Pool Origin   Data%  Meta%  Move Log Cpy%Sync Convert
+  root                   cl       -wi-ao----   17,00g
+  swap                   cl       -wi-ao----   <4,00g
+  lv-iscsi               vg-iscsi owi-aos--- <100,00g
+  snap_vg-iscsi_21.10.13 vg-iscsi swi-a-s---   10,00g      lv-iscsi 0,00
+  lv-logs                vg-logs  -wi-ao----  <15,00g 
+
+```
+
+- Грохнуть данные
+
+```console
+# rm /data/hello-world*
+/ # ls -hal /data/
+total 0      
+drwxr-xr-x    2 root     root           6 Oct 15 11:50 .
+drwxr-xr-x    1 root     root          75 Oct 15 11:49 ..
+```
+
+- Убить Pod, PVC, PV
+
+```console
+k delete -f iscsi/
+pod "iscsi-app" deleted
+persistentvolume "iscsi-pv" deleted
+persistentvolumeclaim "iscsi-pvc" deleted
+```
+
+- Вытащить Logical Volume из iSCSI, сделать merge снапшота, снова
+
+
+```console
+targetcli
+/iscsi/iqn.2021-10.su.yogatour.k8s:storage-test/tpg1/luns/ delete 
+/iscsi/iqn.2021-10.su.yogatour.k8s:storage-test/tpg1/luns/ delete lun=0
+exit
+lvconvert --merge /dev/mapper/vg--iscsi-snap_vg--iscsi_21.10.15
+  Merging of volume vg-iscsi/snap_vg-iscsi_21.10.15 started.
+  vg-iscsi/lv-iscsi: Merged: 100,00%
+```
+
+- закинуть в iSCSI
+
+```console
+targetcli
+/> /backstores/block create lun-test /dev/vg-iscsi/lv-iscsi
+Created block storage object lun-test using /dev/vg-iscsi/lv-iscsi.
+/> /iscsi/iqn.2021-10.su.yogatour.k8s:storage-test/tpg1/luns create /backstores/block/lun-test
+Created LUN 0.
+Created LUN 0->0 mapping in node ACL iqn.2021-10.su.yogatour.k8s:node-3
+Created LUN 0->0 mapping in node ACL iqn.2021-10.su.yogatour.k8s:node-2
+Created LUN 0->0 mapping in node ACL iqn.2021-10.su.yogatour.k8s:node-1
+/> exit
+Global pref auto_save_on_exit=true
+Last 10 configs saved in /etc/target/backup/.
+Configuration saved to /etc/target/saveconfig.json
+
+```
+
+- Проверить, что всё на месте
+
+```console
+ka iscsi/
+pod/iscsi-app created
+persistentvolume/iscsi-pv created
+persistentvolumeclaim/iscsi-pvc-iscsi-app created
+
+kg pv,pvc,po
+NAME                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM               STORAGECLASS   REASON   AGE
+persistentvolume/iscsi-pv   10Gi       RWO            Retain           Bound    default/iscsi-pvc                           36s
+
+NAME                              STATUS   VOLUME     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+persistentvolumeclaim/iscsi-pvc   Bound    iscsi-pv   10Gi       RWO                           33s
+
+NAME                       READY   STATUS    RESTARTS   AGE
+pod/iscsi-app              1/1     Running   0          29s
+
+
+kubectl exec iscsi-app -it -- /bin/sh
+/ # ls -hal /data/
+total 0      
+drwxr-xr-x    2 root     root          65 Oct 15 11:50 .
+drwxr-xr-x    1 root     root          75 Oct 15 11:55 ..
+-rw-r--r--    1 root     root           0 Oct 15 11:50 hello-world
+-rw-r--r--    1 root     root           0 Oct 15 11:50 hello-world2
+-rw-r--r--    1 root     root           0 Oct 15 11:50 hello-world3
+
+```
+
+Все восстановлено! Насколько такой подход подходит для продуктива большой вопрос. Требуется извлечение ресурса из работы.
+</details>
+
+<details>
+<summary> <b>iSCSI Динамический провиженинг | Задание со ⭐   №2 </b></summary>
+
+
+- Подавать один LVM целиком не продуктивно, лучше подать VG.
+- Помимо всего прочего неудобно работать без динамического провиженинга. Попробуем его сделать.
+
+https://github.com/kubernetes-retired/external-storage/tree/master/iscsi/targetd
+
+Сначала удалим все созданные ресурсы, уберем из targetd LUN и переведем его на работу через VG.
+
+```console
+k delete -f iscsi/
+pod "iscsi-app" deleted
+persistentvolume "iscsi-pv" deleted
+persistentvolumeclaim "iscsi-pvc" deleted
+```
+
+```console
+targetcli
+targetcli shell version 2.1.53
+Copyright 2011-2013 by Datera, Inc and others.
+For help on commands, type 'help'.
+
+/> /iscsi/iqn.2021-10.su.yogatour.k8s:storage-test/tpg1/luns/ delete lun=0
+Deleted LUN 0.
+/> /backstores/block delete lun-test
+Deleted storage object lun-test.
+/> 
+```
+
+Разбираемся с дисками:
+
+```console
+lvremove /dev/mapper/vg--iscsi-lv--iscsi
+Do you really want to remove active logical volume vg-iscsi/lv-iscsi? [y/n]: y
+  Logical volume "lv-iscsi" successfully removed
+
+root@co-bgd-kub-iscsi ~# lvs
+  LV      VG      Attr       LSize   Pool Origin Data%  Meta%  Move Log Cpy%Sync Convert
+  root    cl      -wi-ao----  17,00g
+  swap    cl      -wi-ao----  <4,00g
+  lv-logs vg-logs -wi-ao---- <15,00g
+root@co-bgd-kub-iscsi ~# vgs
+  VG       #PV #LV #SN Attr   VSize    VFree
+  cl         1   2   0 wz--n-  <21,00g       0
+  vg-iscsi   1   0   0 wz--n- <130,00g <130,00g
+  vg-logs    1   1   0 wz--n-  <15,00g       0
+root@co-bgd-kub-iscsi ~# pvs
+  PV         VG       Fmt  Attr PSize    PFree
+  /dev/sda2  cl       lvm2 a--   <21,00g       0
+  /dev/sdb   vg-logs  lvm2 a--   <15,00g       0
+  /dev/sdc   vg-iscsi lvm2 a--  <130,00g <130,00g
+```
+
+https://ansilh.com/17-persistent_volumes/02-iscsi-provisioner/
+
+```console
+
+cat /etc/target/targetd.yaml
+user: iscsi
+password: 1scsI-Pa$$w0rd2
+pool_name: vg-iscsi
+ssl: false
+target_name: iqn.2021-10.su.yogatour.k8s:storage-test
+
+systemctl restart target
+```
+
+iscsi-provisioner развернем в отдельном NS
+
+```console
+ka iscsi-provisioner/namespace.yml
+namespace/iscsi-provisioner created
+```
+
+Cоздадим секрет, который по-хорошему лучше запихать в Vault.
+
+```console
+kubectl create secret generic targetd-account --from-literal=username=iscsi --from-literal=password=1scsI-Pa$$w0rd2 -n iscsi-provisioner
+secret/targetd-account created
+
+```
+
+Качаем iscsi-provisioner-d.yaml и правим в нем TARGETD_ADDRESS на 192.168.9.10 и подшаманим Deployment
+
+```console
+cd iscsi-provisioner
+wget https://raw.githubusercontent.com/ansilh/kubernetes-the-hardway-virtualbox/master/config/iscsi-provisioner-d.yaml
+```
+
+
+Раскатываем в соотвествующем NS
+
+```console
+ka iscsi-provisioner-d.yaml -n iscsi-provisioner                                
+clusterrole.rbac.authorization.k8s.io/iscsi-provisioner-runner create
+clusterrolebinding.rbac.authorization.k8s.io/run-iscsi-provisioner create
+serviceaccount/iscsi-provisioner create
+deployment.apps/iscsi-provisioner create
+```
+
+Далее нам нужно создать PersistentVolumeClaim и StorageClass
+
+```console
+wget https://raw.githubusercontent.com/ansilh/kubernetes-the-hardway-virtualbox/master/config/iscsi-provisioner-pvc.yaml
+wget https://raw.githubusercontent.com/ansilh/kubernetes-the-hardway-virtualbox/master/config/iscsi-provisioner-class.yaml
+```
+
+В iscsi-provisioner-class.yaml правим targetPortal, iqn и initiators
+
+```yml
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: iscsi-targetd-vg-targetd
+provisioner: iscsi-targetd
+parameters:
+# this id where the iscsi server is running
+  targetPortal: 192.168.9.10:3260
+
+# this is the iscsi server iqn
+  iqn: iscsi/iqn.2021-10.su.yogatour.k8s:storage-test
+
+# this is the iscsi interface to be used, the default is default
+# iscsiInterface: default
+
+# this must be on eof the volume groups condifgured in targed.yaml, the default is vg-targetd
+# volumeGroup: vg-targetd
+
+# this is a comma separated list of initiators that will be give access to the created volumes, they must correspond to what you have configured in your nodes.
+  initiators: iqn.2021-10.su.yogatour.k8s:node-1,iqn.2021-10.su.yogatour.k8s:node-2,iqn.2021-10.su.yogatour.k8s:node-3
+
+# whether or not to use chap authentication for discovery operations
+  chapAuthDiscovery: "false"
+
+# whether or not to use chap authentication for session operations
+  chapAuthSession: "false"
+
+```
+
+Применяем:
+
+```console
+ka iscsi-provisioner-class.yaml -n iscsi-provisioner
+storageclass.storage.k8s.io/iscsi-targetd-vg-targetd created
+
+ka iscsi-provisioner-pvc.yaml  -n iscsi-provisioner
+persistentvolumeclaim/myclaim created
+
+kg sc -n iscsi-provisioner
+NAME                       PROVISIONER     RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+iscsi-targetd-vg-targetd   iscsi-targetd   Delete          Immediate           false                  3m53s
+
+kg persistentvolumeclaims -n iscsi-provisioner 
+NAME      STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS               AGE
+myclaim   Pending                                      iscsi-targetd-vg-targetd   2m47s
+
+kg all -n iscsi-provisioner
+NAME                                    READY   STATUS    RESTARTS   AGE
+pod/iscsi-provisioner-fc99f98dc-q2f9b   1/1     Running   0          8m26s
+
+NAME                                READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/iscsi-provisioner   1/1     1            1           8m26s
+
+NAME                                          DESIRED   CURRENT   READY   AGE
+replicaset.apps/iscsi-provisioner-fc99f98dc   1         1         1       8m26s
+```
+
+Свежего контроллера, учитывающего эту [ошибку](https://github.com/kubernetes-sigs/nfs-subdir-external-provisioner/issues/25) я пока не нашел. Потому делаем грязный хак:
+
+На каждой ноде в /etc/kubernetes/manifests/kube-apiserver.yaml добавляем - --feature-gates=RemoveSelfLink=false
+
+Удаляем api серверы.  Они поднимутся автоматически. Вспоминаем первые лекции почему.
+
+```console
+
+kubectl delete pod kube-apiserver-co-bgd-kub-master-1 -n kube-system
+pod "kube-apiserver-co-bgd-kub-master-1" deleted
+
+kubectl delete pod kube-apiserver-co-bgd-kub-master-2 -n kube-system
+pod "kube-apiserver-co-bgd-kub-master-2" deleted
+
+kubectl delete pod kube-apiserver-co-bgd-kub-master-3 -n kube-system
+pod "kube-apiserver-co-bgd-kub-master-3" deleted
+```
+
+Готово, можно создавать наши PVC.
+
+</details>
+
+<details>
+<summary> <b>Динамический провиженинг на NFS | Задание со ⭐ №3 </b></summary>
+
+Дока:
+
+https://www.exxactcorp.com/blog/Troubleshooting/deploying-dynamic-nfs-provisioning-in-kubernetes
+
+Примечание: все делается исключительно для теста без оглядки на правильное хранение, безопасность итд на скорую руку.
+
+На нашем ISCSI сервере поднимаем NFS сервер, даем доступ нодам, открываем порты:
+
+
+```console
+dnf install -y nfs-utils
+mkdir /srv/nfs/kubedata -p
+systemctl enable nfs-server -now
+
+exportfs -r                                                                                                                              130 ↵
+exporting 192.168.9.11:/srv/nfs/kubedata
+exporting 192.168.9.12:/srv/nfs/kubedata
+exporting 192.168.9.13:/srv/nfs/kubedata
+firewall-cmd --add-service=nfs --permanent
+firewall-cmd --reload
+
+```
+
+На нодах руками, что не верно, монтируем диск в /mnt:
+
+```console
+3 x dnf install -y nfs-utils
+mount -t nfs 192.168.9.10:/srv/nfs/kubedata /mnt 
+```
+
+Качаем манифесты:
+
+```console
+git clone https://exxsyseng@bitbucket.org/exxsyseng/nfs-provisioning.git
+cd nfs-provisioning
+ka rbac.yaml
+serviceaccount/nfs-client-provisioner created
+clusterrole.rbac.authorization.k8s.io/nfs-client-provisioner-runner created
+clusterrolebinding.rbac.authorization.k8s.io/run-nfs-client-provisioner created
+role.rbac.authorization.k8s.io/leader-locking-nfs-client-provisioner created
+rolebinding.rbac.authorization.k8s.io/leader-locking-nfs-client-provisioner created
+ka class.yaml
+storageclass.storage.k8s.io/managed-nfs-storage created
+
+
+```
+
+Раскатываем наш deployment с провиженером не забывая указать внутри верный ip NFS сервера
+```console
+ka deployment.yaml
+deployment.apps/nfs-client-provisioner created
+```
+
+Ну и пробуем создать pvc
+
+```console
+ ka 4-pvc-nfs.yaml
+persistentvolumeclaim/pvc1 created
+kg pv,pvc
+NAME                                                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM          STORAGECLASS          REASON   AGE
+persistentvolume/pvc-30471b1d-0dd4-4d10-a140-a571476227bf   500Mi      RWX            Delete           Bound    default/pvc1   managed-nfs-storage            15m
+
+NAME                         STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS          AGE
+persistentvolumeclaim/pvc1   Bound    pvc-30471b1d-0dd4-4d10-a140-a571476227bf   500Mi      RWX            managed-nfs-storage   15m
+
+```
+
+PV создался сам!
+
+Поиграем с ReadWriteMany и создадим Deployment nfs-test-rwm с тремя репликами, внутри которых будет бизибокс
+
+```console
+ka dep-rwm-test.yaml 
+
+kg pv,pvc,pod
+NAME                                                        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM          STORAGECLASS          REASON   AGE
+persistentvolume/pvc-30471b1d-0dd4-4d10-a140-a571476227bf   500Mi      RWX            Delete           Bound    default/pvc1   managed-nfs-storage            20m
+
+NAME                         STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS          AGE
+persistentvolumeclaim/pvc1   Bound    pvc-30471b1d-0dd4-4d10-a140-a571476227bf   500Mi      RWX            managed-nfs-storage   20m
+
+NAME                                          READY   STATUS    RESTARTS   AGE
+pod/nfs-client-provisioner-557495f68b-wz9zx   1/1     Running   0          21m
+pod/nfs-test-rwm-55b5fc889d-bfbkc             1/1     Running   0          28s
+pod/nfs-test-rwm-55b5fc889d-d6c4t             1/1     Running   0          28s
+pod/nfs-test-rwm-55b5fc889d-ft86b             1/1     Running   0          28s
+```
+
+Записываем данные:
+
+```console
+kubectl exec pod/nfs-test-rwm-55b5fc889d-bfbkc -it -- /bin/sh
+
+/ # df -h
+Filesystem                Size      Used Available Use% Mounted on
+overlay                  15.0G      2.8G     12.2G  19% /
+tmpfs                    64.0M         0     64.0M   0% /dev
+tmpfs                     1.8G         0      1.8G   0% /sys/fs/cgroup
+192.168.9.10:/srv/nfs/kubedata/default-pvc1-pvc-30471b1d-0dd4-4d10-a140-a571476227bf
+                         17.0G      2.7G     14.3G  16% /mydata
+/dev/mapper/vglib-lvlib
+                         15.0G      2.8G     12.2G  19% /etc/hosts
+/dev/mapper/vglib-lvlib
+                         15.0G      2.8G     12.2G  19% /dev/termination-log
+/dev/mapper/vglib-lvlib
+                         15.0G      2.8G     12.2G  19% /etc/hostname
+/dev/mapper/vglib-lvlib
+                         15.0G      2.8G     12.2G  19% /etc/resolv.conf
+shm                      64.0M         0     64.0M   0% /dev/shm
+tmpfs                     1.8G     12.0K      1.8G   0% /var/run/secrets/kubernetes.io/serviceaccount
+tmpfs                     1.8G         0      1.8G   0% /proc/acpi
+tmpfs                    64.0M         0     64.0M   0% /proc/kcore
+tmpfs                    64.0M         0     64.0M   0% /proc/keys
+tmpfs                    64.0M         0     64.0M   0% /proc/timer_list
+tmpfs                    64.0M         0     64.0M   0% /proc/sched_debug
+tmpfs                     1.8G         0      1.8G   0% /proc/scsi
+tmpfs                     1.8G         0      1.8G   0% /sys/firmware
+
+touch /mydata/123445432.txt
+
+```
+
+Читаем в другом поде:
+```console
+kubectl exec pod/nfs-test-rwm-55b5fc889d-d6c4t -it -- /bin/sh
+ls /mydata/
+123445432.txt
+```
+
+Чтение работает!
+
+Тестируем запись во втором поде:
+
+```console
+ls -hal /mydata/
+total 0      
+drwxrwxrwx    2 root     root          48 Oct 15 15:00 .
+drwxr-xr-x    1 root     root          77 Oct 15 14:55 ..
+-rw-r--r--    1 root     root           0 Oct 15 14:58 123445432.txt
+-rw-r--r--    1 root     root           0 Oct 15 15:00 gdfgdfsgd.txt
+```
+
+Ну и для теста удалим все на третем поде:
+
+```console
+
+kubectl exec pod/nfs-test-rwm-55b5fc889d-ft86b -it -- /bin/sh                    ✹ ✭master 
+/ # ls -hal /mydata/
+total 0      
+drwxrwxrwx    2 root     root          48 Oct 15 15:00 .
+drwxr-xr-x    1 root     root          77 Oct 15 14:55 ..
+-rw-r--r--    1 root     root           0 Oct 15 14:58 123445432.txt
+-rw-r--r--    1 root     root           0 Oct 15 15:00 gdfgdfsgd.txt
+
+
+/ # rm /mydata/*
+
+ls -hal /mydata/
+total 0      
+drwxrwxrwx    2 root     root           6 Oct 15 15:01 .
+drwxr-xr-x    1 root     root          77 Oct 15 14:55 ..
+
+
+touch /mydata/213123131
+
+```
+
+Как это выглядит на нфс сервере:
+
+```console
+root@co-bgd-kub-iscsi ~# cd /srv/nfs/kubedata/default-pvc1-pvc-30471b1d-0dd4-4d10-a140-a571476227bf
+root@co-bgd-kub-iscsi /srv/nfs/kubedata/default-pvc1-pvc-30471b1d-0dd4-4d10-a140-a571476227bf# ll
+итого 0
+-rw-r--r-- 1 root root 0 окт 15 18:03 213123131
+```
+
+О важности человекочитаемого нейминга для создаваемых PVC :)
+
+
+
+</details>
+
+</details>
+
+
+
+<details>
 <summary> <b>ДЗ №11 - kubernetes-gitops (GitOps и инструменты поставки)</b></summary>
 
 - [x] Основное ДЗ
