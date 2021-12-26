@@ -472,7 +472,7 @@ co-k8s-1-stage-node-1   Ready    stage                  33d   v1.22.3   10.5.10.
 
 </details>
 
-
+</details>
 
 <details>
 <summary> <b>ДЗ №13 - kubernetes-debug (Диагностика и отладка кластера и приложений в нем)</b></summary>
