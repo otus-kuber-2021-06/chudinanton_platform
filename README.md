@@ -1,7 +1,481 @@
 # chudinanton_platform
 chudinanton Platform repository
 <details>
-<summary> <b>ДЗ №13 Диагностика и отладка кластера и приложений в нем</b></summary>
+<summary> <b>ДЗ №14 - kubernetes-production-clusters (Подходы к развертыванию и обновлению production-grade кластера)</b></summary>
+
+- [x] Основное ДЗ
+
+- [x] Дополнительное задание *
+
+<details>
+<summary> <b>kubeadm</b></summary>
+
+Подготовка машин:
+
+Отключаем на машинах swap (не забываем про fstab)
+
+```console
+swapoff -a
+vi /etc/fstab
+```
+
+Включаем маршрутизацию
+
+```console
+cat > /etc/sysctl.d/99-kubernetes-cri.conf <<eof net.bridge.bridge-nf-calliptables="1" net.ipv4.ip_forward="1" net.bridge.bridge-nf-call-ip6tables="1" eof=""
+sysctl="" --system="" <="" code=""></eof>
+```
+
+Установим docker:
+
+```console
+apt-get update && apt-get install -y \
+apt-transport-https ca-certificates curl software-properties-common gnupg2
+
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+add-apt-repository \
+"deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+$(lsb_release -cs) \
+stable"
+
+apt-get update && apt-get install -y \
+containerd.io=1.2.13-1 \
+docker-ce=5:19.03.8~3-0~ubuntu-$(lsb_release -cs) \
+docker-ce-cli=5:19.03.8~3-0~ubuntu-$(lsb_release -cs)
+```
+
+## Setup daemon.
+
+```console
+cat > /etc/docker/daemon.json <<EOF
+{
+"exec-opts": ["native.cgroupdriver=systemd"],
+"log-driver": "json-file",
+"log-opts": {
+"max-size": "100m"
+},
+"storage-driver": "overlay2"
+}
+EOF
+mkdir -p /etc/systemd/system/docker.service.d
+# Restart docker.
+systemctl daemon-reload
+systemctl restart docker
+```
+
+Установка kubeadm, kubelet and kubectl
+
+```console
+apt-get update && apt-get install -y apt-transport-https curl
+
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+cat <<EOF > /etc/apt/sources.list.d/kubernetes.list
+deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+apt-get update
+apt-get install -y kubelet=1.17.4-00 kubeadm=1.17.4-00 kubectl=1.17.4-00
+```
+
+Создание кластера
+
+```console
+kubeadm init --pod-network-cidr=192.168.0.0/24
+```
+
+В выводе будут:
+- команда для копирования конфига kubectl
+- сообщение о том, что необходимо установить сетевой плагин
+- команда для присоединения worker ноды
+
+Копируем конфиг kubectl
+```console
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+```
+
+Устанавливаем сетевой плагин:
+
+https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/#pod-network
+
+```console
+kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+```
+
+Подключаем worker-ноды
+
+Если вывод команды потерялся, токены можно посмотреть командой
+
+```console
+kubeadm token list
+```
+
+Получить хеш
+
+```console
+openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der
+2>/dev/null | \
+openssl dgst -sha256 -hex | sed 's/^.* //'
+```
+
+```console
+kubectl get nodes
+NAME      STATUS   ROLES    AGE     VERSION
+master    Ready    master   9m51s   v1.17.4
+worker1   Ready    <none>   3m6s    v1.17.4
+worker2   Ready    <none>   89s     v1.17.4
+worker3   Ready    <none>   64s     v1.17.4
+```
+
+Запуск нагрузки
+
+Для демонстрации работы кластера запустим nginx:
+
+```yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 4
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.17.2
+        ports:
+        - containerPort: 80
+```
+
+```console
+ka deployment-nginx.yaml
+```
+
+## Обновление кластера
+
+Так как кластер мы разворачивали с помощью kubeadm, то и производить обновление будем с помощью него. Обновлять ноды будем по очереди.
+
+### Обновление мастера
+
+Допускается, отставание версий worker-нод от master, но не наоборот. Поэтому обновление будем начинать с нее master-нода у нас версии 1.16.8. Обновление пакетов
+
+```console
+apt-get update && apt-get install -y kubeadm=1.18.0-00 \
+kubelet=1.18.0-00 kubectl=1.18.0-00
+```
+
+Проверка
+
+```console
+kubectl get nodes
+NAME      STATUS   ROLES    AGE     VERSION
+master    Ready    master   16m     v1.18.0
+worker1   Ready    <none>   9m55s   v1.17.4
+worker2   Ready    <none>   7m25s   v1.17.4
+worker3   Ready    <none>   6m18s   v1.17.4
+```
+
+Обновим остальные компоненты кластера:
+
+Обновление компонентов кластера (API-server, kube-proxy, controllermanager)
+
+```console
+kubeadm upgrade plan
+```
+
+```console
+kubeadm upgrade apply v1.18.0
+```
+
+Вывод worker-нод из планирования
+
+```console
+kubectl drain worker1
+```
+
+kubectl drain убирает всю нагрузку, кроме DaemonSet, поэтому мы явно должны сказать, что уведомлены об этом
+
+```console
+kubectl drain worker1 --ignore-daemonsets
+```
+
+kubectl drain возвращает управление только тогда, когда все поды выведены с ноды
+
+
+Когда мы вывели ноду на обслуживание, к статусу добавилась строчка SchedulingDisabled
+
+### Обновление worker-нод
+
+На worker-ноде выполняем
+
+```console
+apt-get install -y kubelet=1.18.0-00 kubeadm=1.18.0-00
+systemctl restart kubelet
+```
+
+### Просмотр обновления
+
+После обновления kubectl показывает новую версию, и статус
+SchedulingDisabled
+
+```console
+kubectl get nodes
+NAME      STATUS                     ROLES    AGE   VERSION
+master    Ready                      master   24m   v1.18.0
+worker1   Ready,SchedulingDisabled   <none>   19m   v1.18.0
+worker2   Ready                      <none>   16m   v1.17.4
+worker3   Ready                      <none>   15m   v1.17.4
+```
+
+### Возвращение ноды в планирование
+
+```console
+kubectl uncordon worker1
+```
+
+Обновляем оставшиеся ноды:
+
+```console
+kubectl get nodes
+NAME      STATUS   ROLES    AGE   VERSION
+master    Ready    master   48m   v1.18.0
+worker1   Ready    <none>   42m   v1.18.0
+worker2   Ready    <none>   39m   v1.18.0
+worker3   Ready    <none>   38m   v1.18.0
+```
+</details>
+
+
+<details>
+<summary> <b>kubespray - Автоматическое развертывание кластеров</b></summary>
+
+Данный шаг подробно описан в проектой работе и включает в себя:
+
+- Практику IaC в gitlab ci
+- Обновление кластера
+- Upscale кластера
+
+
+```yml
+---
+image: registry-gitlab.XXX/iac/k8s/bigdata/infra_k8s_kubespray/ansible-playbook-big:v0.0.5
+variables:
+  ANSIBLE_HOST_KEY_CHECKING: "False"
+
+before_script:
+  # Copy SSH keypair
+  - mkdir -p ~/.ssh
+  - echo "$PACKET_PRIVATE_KEY" | base64 -d > ~/.ssh/id_rsa
+  - chmod 400 ~/.ssh/id_rsa
+  - echo "$PACKET_PUBLIC_KEY" | base64 -d > ~/.ssh/id_rsa.pub
+
+stages:
+  - unit-tests
+  - deploy_k8s
+  - scale_k8s
+  - update_k8s
+
+yaml-check:
+  stage: unit-tests
+  variables:
+    LANG: C.UTF-8
+  script:
+    - yamllint --no-warnings .
+
+deploy_k8s:
+  stage: deploy_k8s
+  script:
+    - ansible-playbook -i inventory/prod/inventory.ini --private-key="~/.ssh/id_rsa" -b --diff cluster.yml
+    - scp -i "~/.ssh/id_rsa" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null inventory/prod/artifacts/admin.conf root@10.5.10.67:/root/.kube
+  needs:
+    - job: yaml-check
+  when: manual
+  only:
+    - master
+
+scale_cluster:
+  stage: scale_k8s
+  script:
+    - ansible-playbook -i inventory/prod/inventory.ini --private-key="~/.ssh/id_rsa" -b scale.yml
+  needs:
+    - job: yaml-check
+  when: manual
+  only:
+    - master
+
+update_cluster:
+  stage: update_k8s
+  script:
+    - ansible-playbook -i inventory/prod/inventory.ini --private-key="~/.ssh/id_rsa" -b upgrade-cluster.yml
+    - scp -i "~/.ssh/id_rsa" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null inventory/prod/artifacts/admin.conf root@10.5.10.67:/root/.kube
+  needs:
+    - job: yaml-check
+  when: manual
+  only:
+    - master
+```
+
+inventory.ini:
+
+```yml
+co-k8s-1-master-1 ansible_host=10.5.10.50 ip=10.5.10.50
+co-k8s-1-master-2 ansible_host=10.5.10.51 ip=10.5.10.51
+co-k8s-1-master-3 ansible_host=10.5.10.52 ip=10.5.10.52
+co-k8s-1-istio-1 ansible_host=10.5.10.53 ip=10.5.10.53
+co-k8s-1-istio-2 ansible_host=10.5.10.54 ip=10.5.10.54
+co-k8s-1-istio-3 ansible_host=10.5.10.55 ip=10.5.10.55
+co-k8s-1-istio-4 ansible_host=10.5.10.56 ip=10.5.10.56
+co-k8s-1-infra-node-1 ansible_host=10.5.10.57 ip=10.5.10.57
+co-k8s-1-infra-node-2 ansible_host=10.5.10.58 ip=10.5.10.58
+co-k8s-1-infra-node-3 ansible_host=10.5.10.59 ip=10.5.10.59
+co-k8s-1-infra-node-4 ansible_host=10.5.10.60 ip=10.5.10.60
+co-k8s-1-prod-node-1 ansible_host=10.5.10.61 ip=10.5.10.61
+co-k8s-1-prod-node-2 ansible_host=10.5.10.62 ip=10.5.10.62
+co-k8s-1-prod-node-3 ansible_host=10.5.10.63 ip=10.5.10.63
+co-k8s-1-prod-node-4 ansible_host=10.5.10.64 ip=10.5.10.64
+co-k8s-1-stage-node-1 ansible_host=10.5.10.65 ip=10.5.10.65
+co-k8s-1-dev-node-1 ansible_host=10.5.10.66 ip=10.5.10.66
+co-k8s-1-critical-1 ansible_host=10.5.10.76 ip=10.5.10.76
+co-k8s-1-critical-2 ansible_host=10.5.10.77 ip=10.5.10.77
+co-k8s-1-critical-3 ansible_host=10.5.10.78 ip=10.5.10.78
+co-k8s-1-critical-4 ansible_host=10.5.10.79 ip=10.5.10.79
+
+[kube-master]
+co-k8s-1-master-1
+co-k8s-1-master-2
+co-k8s-1-master-3
+
+[etcd]
+co-k8s-1-master-1
+co-k8s-1-master-2
+co-k8s-1-master-3
+
+[kube_node]
+co-k8s-1-istio-1
+co-k8s-1-istio-2
+co-k8s-1-istio-3
+co-k8s-1-istio-4
+co-k8s-1-infra-node-1
+co-k8s-1-infra-node-2
+co-k8s-1-infra-node-3
+co-k8s-1-infra-node-4
+co-k8s-1-prod-node-1
+co-k8s-1-prod-node-2
+co-k8s-1-prod-node-3
+co-k8s-1-prod-node-4
+co-k8s-1-stage-node-1
+co-k8s-1-dev-node-1
+co-k8s-1-critical-1
+co-k8s-1-critical-2
+co-k8s-1-critical-3
+co-k8s-1-critical-4
+
+[kube-node-prod]
+co-k8s-1-prod-node-1
+co-k8s-1-prod-node-2
+co-k8s-1-prod-node-3
+co-k8s-1-prod-node-4
+
+[kube-node-istio]
+co-k8s-1-istio-1
+co-k8s-1-istio-2
+co-k8s-1-istio-3
+co-k8s-1-istio-4
+
+[kube-node-infra]
+co-k8s-1-infra-node-1
+co-k8s-1-infra-node-2
+co-k8s-1-infra-node-3
+co-k8s-1-infra-node-4
+
+[kube-node-critical]
+co-k8s-1-critical-1
+co-k8s-1-critical-2
+co-k8s-1-critical-3
+co-k8s-1-critical-4
+
+[kube-node-stage]
+co-k8s-1-stage-node-1
+
+[kube-node-dev]
+co-k8s-1-dev-node-1
+
+[calico_rr]
+
+[k8s_cluster:children]
+kube-master
+kube_node
+calico_rr
+```
+
+```console
+kg nodes -o wide                                                                ✹kubernetes-production-clusters 
+NAME                    STATUS   ROLES                  AGE   VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                           KERNEL-VERSION              CONTAINER-RUNTIME
+co-k8s-1-critical-1     Ready    critical               33d   v1.22.3   10.5.10.76    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-critical-2     Ready    critical               33d   v1.22.3   10.5.10.77    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-critical-3     Ready    critical               33d   v1.22.3   10.5.10.78    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-critical-4     Ready    critical               33d   v1.22.3   10.5.10.79    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-dev-node-1     Ready    dev                    33d   v1.22.3   10.5.10.66    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-infra-node-1   Ready    infra                  33d   v1.22.3   10.5.10.57    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-infra-node-2   Ready    infra                  33d   v1.22.3   10.5.10.58    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-infra-node-3   Ready    infra                  33d   v1.22.3   10.5.10.59    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-infra-node-4   Ready    infra                  33d   v1.22.3   10.5.10.60    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-istio-1        Ready    istio                  33d   v1.22.3   10.5.10.53    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-istio-2        Ready    istio                  33d   v1.22.3   10.5.10.54    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-istio-3        Ready    istio                  33d   v1.22.3   10.5.10.55    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-istio-4        Ready    istio                  33d   v1.22.3   10.5.10.56    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-master-1       Ready    control-plane,master   33d   v1.22.3   10.5.10.50    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-master-2       Ready    control-plane,master   33d   v1.22.3   10.5.10.51    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-master-3       Ready    control-plane,master   33d   v1.22.3   10.5.10.52    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-prod-node-1    Ready    node                   33d   v1.22.3   10.5.10.61    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-prod-node-2    Ready    node                   33d   v1.22.3   10.5.10.62    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-prod-node-3    Ready    node                   33d   v1.22.3   10.5.10.63    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-prod-node-4    Ready    node                   33d   v1.22.3   10.5.10.64    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-stage-node-1   Ready    stage                  33d   v1.22.3   10.5.10.65    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+```
+</details>
+
+<details>
+<summary> <b>Дополнительное задание</b></summary>
+
+```console
+kg nodes -o wide                                                                ✹kubernetes-production-clusters 
+NAME                    STATUS   ROLES                  AGE   VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                           KERNEL-VERSION              CONTAINER-RUNTIME
+co-k8s-1-critical-1     Ready    critical               33d   v1.22.3   10.5.10.76    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-critical-2     Ready    critical               33d   v1.22.3   10.5.10.77    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-critical-3     Ready    critical               33d   v1.22.3   10.5.10.78    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-critical-4     Ready    critical               33d   v1.22.3   10.5.10.79    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-dev-node-1     Ready    dev                    33d   v1.22.3   10.5.10.66    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-infra-node-1   Ready    infra                  33d   v1.22.3   10.5.10.57    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-infra-node-2   Ready    infra                  33d   v1.22.3   10.5.10.58    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-infra-node-3   Ready    infra                  33d   v1.22.3   10.5.10.59    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-infra-node-4   Ready    infra                  33d   v1.22.3   10.5.10.60    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-istio-1        Ready    istio                  33d   v1.22.3   10.5.10.53    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-istio-2        Ready    istio                  33d   v1.22.3   10.5.10.54    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-istio-3        Ready    istio                  33d   v1.22.3   10.5.10.55    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-istio-4        Ready    istio                  33d   v1.22.3   10.5.10.56    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-master-1       Ready    control-plane,master   33d   v1.22.3   10.5.10.50    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-master-2       Ready    control-plane,master   33d   v1.22.3   10.5.10.51    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-master-3       Ready    control-plane,master   33d   v1.22.3   10.5.10.52    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-prod-node-1    Ready    node                   33d   v1.22.3   10.5.10.61    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-prod-node-2    Ready    node                   33d   v1.22.3   10.5.10.62    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-prod-node-3    Ready    node                   33d   v1.22.3   10.5.10.63    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-prod-node-4    Ready    node                   33d   v1.22.3   10.5.10.64    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+co-k8s-1-stage-node-1   Ready    stage                  33d   v1.22.3   10.5.10.65    <none>        Rocky Linux 8.5 (Green Obsidian)   4.18.0-348.el8.0.2.x86_64   containerd://1.4.11
+```
+
+</details>
+
+</details>
+
+<details>
+<summary> <b>ДЗ №13 - kubernetes-debug (Диагностика и отладка кластера и приложений в нем)</b></summary>
 
 - [x] Основное ДЗ
 
